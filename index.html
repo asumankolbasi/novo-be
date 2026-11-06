@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NOVO-BE</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+</head>
+<body>
+<header class="top">
+  <img class="logo" src="novo_logo.webp" alt="NOVO">
+  <h1>NOVO-BE</h1>
+  <nav class="steps" id="steps">
+    <span class="step" data-tab="data">1 Data</span><span class="step" data-tab="time">2 Time</span><span class="step" data-tab="wave">3 Gates</span><span class="step" data-tab="psd">4 PSD</span><span class="step" data-tab="save">5 Save</span>
+  </nav>
+  <label class="btn primary" title="Select the dma*.bin and meta.json files of one run (or drop them anywhere on the page)">Load files <input type="file" id="upInput" multiple accept=".bin,.json,application/json,application/octet-stream" hidden></label>
+  <button class="btn primary" id="btnProcess" type="button" title="Process the frames inside the selected time window with the current gates" hidden>Process</button>
+  <button class="btn" id="btnClose" type="button" title="Close the run and free memory" hidden>Close</button>
+  <span class="mono small muted" id="upStatus"></span>
+  <div class="chips" id="chips"></div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button class="tab active" data-tab="data" type="button">Data</button>
+  <button class="tab" data-tab="time" type="button">Time</button>
+  <button class="tab" data-tab="wave" type="button">Waveform</button>
+  <button class="tab" data-tab="psd" type="button">PSD</button>
+  <button class="tab" data-tab="save" type="button">Save</button>
+</nav>
+
+<main>
+  <!-- ========================= Data ========================= -->
+  <section id="tab-data" class="pane active">
+    <div class="readout">
+      <div class="panel">
+        <h2>Raw data</h2>
+        <div class="drop" id="dropZone">
+          <div>Drop <b>dma0.bin</b>, <b>dma1.bin</b> and <b>meta.json</b> of one run here, or <label class="link">choose them<input type="file" id="upInput2" multiple accept=".bin,.json,application/json,application/octet-stream" hidden></label>.</div>
+          <div class="muted small">Nothing is uploaded anywhere: decoding, pulse processing and ROOT writing all happen in your browser. Suitable for runs up to a few hundred MB.</div>
+        </div>
+        <div class="bar" id="runBar" hidden>
+          <label>Run <select id="runSelect"></select></label>
+          <button class="btn" id="btnOpen" type="button">Open</button>
+        </div>
+        <dl id="dInfo"></dl>
+      </div>
+      <div class="panel">
+        <h2>Workflow</h2>
+        <ol class="howto">
+          <li><b>Data:</b> load the DMA files of a run; only the frame headers are read at this point.</li>
+          <li><b>Time:</b> drag horizontally on the count-rate plot to select the time range of interest (e.g. beam on), then <i>Process window</i>.</li>
+          <li><b>Waveform:</b> drag the short/long gate bands and the threshold line, then <i>Apply and process</i>.</li>
+          <li><b>PSD:</b> set the n/γ cut on the PSD–energy map by dragging the red line or taking it from the fit.</li>
+          <li><b>Save:</b> build CoMPASS-style ROOT files (<code>Data_R</code> / <code>Data_F</code> trees) and download them.</li>
+        </ol>
+        <p class="muted small">The output tree has the same branches as CoMPASS: <code>Channel/s Timestamp/l Board/s Energy/s EnergyShort/s Flags/i</code> plus the optional <code>Samples</code> (TArrayS) waveform, so existing CoMPASS macros work unchanged.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================= Time ========================= -->
+  <section id="tab-time" class="pane">
+    <div class="bar">
+      <label>Channel <select id="tCh"><option value="0">CH0</option><option value="1">CH1</option></select></label>
+      <button class="btn" id="tRefresh" type="button">Refresh</button>
+      <span class="sep"></span>
+      <label>Time window (s) <input type="number" id="tWin0" step="0.1" placeholder="start"> – <input type="number" id="tWin1" step="0.1" placeholder="end"></label>
+      <button class="btn" id="tWinApply" type="button">Apply</button>
+      <button class="btn" id="tWinClear" type="button">Whole run</button>
+      <button class="btn primary" id="tProcess" type="button" title="Process only the frames inside the selected window">Process window</button>
+      <span class="mono muted small" id="tWinInfo"></span>
+    </div>
+    <div class="hint muted small">Drag horizontally on the count-rate plot to select the range, then "Process window": only those frames are processed and written to the ROOT files. Changing the gates on the Waveform tab requires processing again.</div>
+    <div class="two">
+      <div id="ratePlot" class="plot"></div>
+      <div id="dtPlot" class="plot"></div>
+    </div>
+  </section>
+
+  <!-- ========================= Waveform ========================= -->
+  <section id="tab-wave" class="pane">
+    <div class="bar">
+      <button class="btn" id="wFirst" type="button" title="First (Home)">⇤</button>
+      <button class="btn" id="wPrev" type="button" title="Previous (←)">◀</button>
+      <input type="range" id="wSlider" min="0" max="0" value="0" aria-label="Frame">
+      <button class="btn" id="wNext" type="button" title="Next (→)">▶</button>
+      <button class="btn" id="wLast" type="button" title="Last (End)">⇥</button>
+      <label>Frame <input type="number" id="wNo" min="0" value="0"></label>
+      <span class="mono muted" id="wCount">/ 0</span>
+      <span class="sep"></span>
+      <label>Valid pulse <select id="wValidCh"><option value="0">CH0</option><option value="1">CH1</option></select></label>
+      <button class="btn" id="wPrevValid" type="button" title="Previous valid (Shift+←)">◀ valid</button>
+      <button class="btn" id="wNextValid" type="button" title="Next valid (Shift+→)">valid ▶</button>
+      <button class="btn" id="wPlay" type="button" title="Play (space)">Play</button>
+      <label><input type="checkbox" id="wGates" checked> Gates</label>
+      <label><input type="checkbox" id="wNs"> x axis in ns</label>
+    </div>
+    <div id="wavePlot" class="plot tall"></div>
+    <div class="bar" id="wPending" hidden>
+      <span id="wPendingText" class="mono"></span>
+      <button class="btn primary" id="wApply" type="button">Apply and process</button>
+      <button class="btn" id="wDiscard" type="button">Discard</button>
+    </div>
+    <div class="hint muted small">Dark band = short gate, light band = long gate, dashed red line = threshold. Drag the band edges and the threshold line; values snap to whole samples (1 sample = 0.77 ns). "Apply and process" re-processes the selected time window with these gates.</div>
+    <div class="readout">
+      <div class="panel"><h2>Pulse results</h2>
+        <table class="t" id="wRes"><thead><tr><th>Channel</th><th>Baseline</th><th>Noise</th><th>Amplitude</th><th>t₀</th><th>Q short</th><th>Q long</th><th>PSD</th><th>Status</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="panel"><h2>Parameters</h2>
+        <form id="paramForm" class="form compact">
+          <label>Polarity <select name="polarity"><option value="auto">Automatic</option><option value="pos">Positive</option><option value="neg">Negative</option></select></label>
+          <label>Baseline window (samples) <input name="baseline_samples" type="number" min="4" max="1000"></label>
+          <label>Threshold (ADC codes) <input name="threshold" type="number" step="1"></label>
+          <label>CFD fraction <input name="cfd_fraction" type="number" step="0.05" min="0.05" max="0.95"></label>
+          <label>Pre-gate (samples) <input name="pre_gate" type="number" min="0" max="100"></label>
+          <label>Short gate (samples) <input name="short_gate" type="number" min="1"></label>
+          <label>Long gate (samples) <input name="long_gate" type="number" min="1"></label>
+          <label>Sample period (ns) <input name="sample_ns" type="number" step="0.001"></label>
+          <div class="bar"><button class="btn primary" type="submit">Apply and process</button><span class="mono muted small" id="sOut"></span></div>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================= PSD ========================= -->
+  <section id="tab-psd" class="pane">
+    <div class="bar">
+      <label>Source <select id="pSrc" title="With a gamma-only or neutron-only source no separation fit is needed: every event gets that class"><option value="mixed">Mixed (n + γ)</option><option value="gamma_only">Gamma only</option><option value="neutron_only">Neutron only</option></select></label>
+      <label>Channel <select id="pCh"><option value="2">Both ends</option><option value="0">CH0</option><option value="1">CH1</option></select></label>
+      <label>Energy window <input type="number" id="pElo" placeholder="low"> – <input type="number" id="pEhi" placeholder="high"></label>
+      <button class="btn" id="pEClear" type="button" title="Remove the energy window">All</button>
+      <label>PSD range <input type="number" id="pPlo" placeholder="auto" step="0.05"> – <input type="number" id="pPhi" placeholder="auto" step="0.05"></label>
+      <label><input type="checkbox" id="pLogZ" checked> Log colour</label>
+      <span class="sep"></span>
+      <label>n/γ cut <input type="number" id="pCut" value="0.147" step="0.005"></label>
+      <button class="btn" id="pCutApply" type="button">Apply</button>
+      <button class="btn" id="pCutFromFit" type="button" title="Use the crossing point of the two-Gaussian fit as the cut">From fit</button>
+      <button class="btn" id="pRefresh" type="button">Refresh</button>
+    </div>
+    <div class="two">
+      <div id="psd2dPlot" class="plot"></div>
+      <div id="psd1dPlot" class="plot"></div>
+    </div>
+    <div class="readout">
+      <div class="panel"><h2>Separation quality (selected energy window)</h2><dl id="pFit"></dl></div>
+      <div class="panel"><h2>Counts</h2><dl id="pCounts"></dl></div>
+    </div>
+    <div class="hint muted small">The cut is not applied to the ROOT output: every event is stored with Energy = Q_long and EnergyShort = Q_short, and PSD = (Energy − EnergyShort) / Energy is computed in your macro. The cut only sets the neutron bit (0x40) in Flags and is recorded in settings.json.</div>
+  </section>
+
+  <!-- ========================= Save ========================= -->
+  <section id="tab-save" class="pane">
+    <div class="readout">
+      <div class="panel"><h2>File layout</h2>
+        <div class="form compact">
+          <label><span><input type="checkbox" id="xPerCh" checked> One file per channel (as CoMPASS)</span><span class="hint">DataR_CH0@NOVO_&lt;id&gt;_&lt;run&gt;.root and DataR_CH1@…; unchecked: both channels in one file, separated by the Channel branch.</span></label>
+          <label><span><input type="checkbox" id="xFiltered" checked> Also write filtered Data_F files</span><span class="hint">RAW/ holds every frame of the selected window (Data_R); FILTERED/ holds the events passing the filters below (Data_F).</span></label>
+          <label><span><input type="checkbox" id="xWave"> Include waveforms (Samples, TArrayS)</span><span class="hint">1012 samples ≈ 2 KB per event; about 100× larger files.</span></label>
+          <label><span><input type="checkbox" id="xCfd" checked> Add the CFD fine time to the timestamp</span><span class="hint">Timestamp (ps) = frame time + CFD crossing time of the pulse; unchecked: the trigger sample (500) is used.</span></label>
+          <label>Energy divisor <select id="xScale"><option value="auto">Automatic (fit into 16 bits)</option><option value="1">1</option><option value="2">2</option><option value="4">4</option><option value="8">8</option><option value="16">16</option><option value="32">32</option></select><span class="hint">Energy = Q_long / divisor, EnergyShort = Q_short / divisor (16-bit, at most 65535).</span></label>
+        </div>
+      </div>
+      <div class="panel"><h2>Data_F filters</h2>
+        <div class="form compact">
+          <label><span><input type="checkbox" id="fPileup" checked> Exclude pile-up events</span></label>
+          <label><span><input type="checkbox" id="fCoinc" checked> Coincident events only (a pulse on both ends)</span></label>
+          <label>Coincidence window ± (ns) <input type="number" id="fWindow" step="0.1" min="0" value="3"></label>
+          <div class="bar"><button class="btn" id="fApply" type="button">Apply</button><span class="mono small" id="fOut"></span></div>
+        </div>
+        <p class="muted small">The time window is applied when processing: both Data_R and Data_F contain only the selected range. Data_F always requires a valid pulse (CFD crossing found, amplitude ≥ threshold).</p>
+      </div>
+    </div>
+    <div class="bar">
+      <button class="btn primary" id="xBuild" type="button">Build ROOT files</button>
+      <button class="btn" id="xZip" type="button" hidden>Download all as ZIP</button>
+      <button class="btn" id="xSettings" type="button" hidden>settings.json</button>
+      <button class="btn" id="xInfo" type="button" hidden>run.info</button>
+      <span class="mono small" id="xOut"></span>
+    </div>
+    <div class="tablewrap short" id="xFilesWrap" hidden><table class="t" id="xFiles"><thead><tr><th>Folder</th><th>File</th><th>Tree</th><th>Events</th><th>Size</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div class="readout">
+      <div class="panel"><h2>Tree layout (same as CoMPASS)</h2>
+        <table class="t ref"><thead><tr><th>Branch</th><th>Type</th><th>Content</th></tr></thead><tbody>
+          <tr><td>Channel</td><td>UShort_t</td><td>0 / 1: the SiPM at either end of the bar</td></tr>
+          <tr><td>Timestamp</td><td>ULong64_t</td><td>picoseconds from the first sample of the first frame of the run</td></tr>
+          <tr><td>Board</td><td>UShort_t</td><td>detector id from the frame header</td></tr>
+          <tr><td>Energy</td><td>UShort_t</td><td>Q_long / divisor (sum of baseline-subtracted ADC codes over the long gate)</td></tr>
+          <tr><td>EnergyShort</td><td>UShort_t</td><td>Q_short / divisor</td></tr>
+          <tr><td>Flags</td><td>UInt_t</td><td>0x1 pile-up · 0x2 ADC saturation · 0x4 no valid pulse · 0x8 frames lost before · 0x10 outside coincidence window · 0x40 neutron class</td></tr>
+          <tr><td>Samples</td><td>TArrayS</td><td>optional: 1012 samples, signed 14-bit ADC codes, 769.23 ps per sample</td></tr>
+        </tbody></table>
+      </div>
+      <div class="panel"><h2>Reading it (ROOT)</h2>
+<pre class="code">TFile f("DataR_CH0@NOVO_33_run.root");
+TTree* t = (TTree*)f.Get("Data_R");
+UShort_t ch, board, en, es; ULong64_t ts; UInt_t fl;
+t->SetBranchAddress("Channel", &amp;ch);  t->SetBranchAddress("Timestamp", &amp;ts);
+t->SetBranchAddress("Energy", &amp;en);   t->SetBranchAddress("EnergyShort", &amp;es);
+t->SetBranchAddress("Flags", &amp;fl);
+for (Long64_t i = 0; i &lt; t->GetEntries(); i++) {
+  t->GetEntry(i);
+  double psd = en ? double(en - es) / en : 0;   // (Q_long - Q_short) / Q_long
+}
+t->Draw("(Energy-EnergyShort)/Energy:Energy", "!(Flags&amp;4)", "colz");</pre>
+        <p class="muted small"><code>settings.json</code> (gates, threshold, cut, filters, flag definitions) and <code>run.info</code> are written next to the files. For waveforms: <code>TArrayS* s = nullptr; t->SetBranchAddress("Samples", &amp;s);</code></p>
+      </div>
+    </div>
+  </section>
+</main>
+<div class="dropveil" id="dropveil" hidden><div>Drop the files: dma0.bin, dma1.bin, meta.json</div></div>
+<div class="toast" id="toast" hidden></div>
+<script src="pipeline.js"></script>
+<script src="rootwriter.js"></script>
+<script src="zip.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
