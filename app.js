@@ -1,6 +1,6 @@
 'use strict';
 /* NOVO-BE — page logic. Opens raw DMA frames, lets the user pick a time window, set the
- * gates and the n/γ cut, and writes CoMPASS-style ROOT files. All work is done in the browser by
+ * gates and the n/γ cut, and writes ROOT files. All work is done in the browser by
  * pipeline.js (decoding, pulse processing, histograms) and rootwriter.js (ROOT files). */
 
 const $ = id => document.getElementById(id);
@@ -36,6 +36,7 @@ async function uploadFiles(fileList) {
   if (!files.some(f => /\.bin$/i.test(f.name))) { toast('At least one .bin file is required'); return; }
   const total = files.reduce((a, f) => a + f.size, 0), st = $('upStatus'), t0 = performance.now();
   st.textContent = `reading… ${(total / 1048576).toFixed(1)} MB`;
+  const poll = watchProgress(st, `reading… ${(total / 1048576).toFixed(0)} MB`, t0);
   try {
     const r = await api('/api/upload', { files });
     S.summary = r.summary; S.cur = 0; S.exported = null;
@@ -43,6 +44,13 @@ async function uploadFiles(fileList) {
     st.textContent = '';
     toast(`Opened: ${num(S.summary.frames)} frames in ${((performance.now() - t0) / 1000).toFixed(1)} s · select the time window and press "Process window"`, 6000);
   } catch (e) { st.textContent = ''; toast('Loading failed: ' + e.message, 6000); }
+  finally { clearInterval(poll); }
+}
+// the pipeline reports its stage and progress; show them while a long call runs
+function watchProgress(el, fallback, t0) {
+  return setInterval(async () => {
+    try { const p = await api('/api/progress'); const secs = ((performance.now() - t0) / 1000).toFixed(0); el.textContent = p.busy ? `${p.stage}${p.total > 0 ? ` ${Math.round(100 * p.done / p.total)} %` : ''} · ${secs} s` : `${fallback} · ${secs} s`; } catch (_) { /* keep */ }
+  }, 250);
 }
 async function loadRuns() {
   const r = await api('/api/runs'), sel = $('runSelect'); sel.innerHTML = '';
@@ -72,10 +80,10 @@ async function processRun() {
   if (S.processing) { toast('Processing is running'); return; }
   S.processing = true; $('btnProcess').disabled = true; $('tProcess').disabled = true;
   const st = $('upStatus'), t0 = performance.now(); st.textContent = 'processing…';
-  await new Promise(r => setTimeout(r, 30));                       // let the status paint before the long synchronous job
+  const poll = watchProgress(st, 'processing…', t0);
   try { S.summary = await api('/api/process', {}); }
   catch (e) { toast('Processing failed: ' + e.message, 6000); st.textContent = ''; return; }
-  finally { S.processing = false; $('btnProcess').disabled = false; $('tProcess').disabled = false; }
+  finally { clearInterval(poll); S.processing = false; $('btnProcess').disabled = false; $('tProcess').disabled = false; }
   S.pending = null; S.exported = null; afterSummary(); st.textContent = '';
   const pr = S.summary.proc_range;
   toast(`Processed ${num(pr ? pr.frames : S.summary.frames)} frames in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
@@ -101,7 +109,7 @@ function renderChips() {
   const s = S.summary, c = $('chips'); c.innerHTML = '';
   if (!s) return;
   const chip = (txt, cls = '') => { const d = document.createElement('span'); d.className = 'chip ' + cls; d.textContent = txt; c.appendChild(d); };
-  chip(`${num(s.frames)} frames`); chip(`${fmt(s.duration_s, 2)} s`);
+  chip(`${num(s.frames)} frames`); chip(`${fmt(s.duration_s, 2)} s`); if (s.bytes >= 1073741824) chip(`${(s.bytes / 1073741824).toFixed(1)} GB on disk`);
   if (!s.processed) chip('not processed · pick the window on the Time tab and press "Process window"', 'warn');
   else if (s.dirty) chip('gates or window changed · process again', 'warn');
   if (s.processed && s.proc_range && s.proc_range.frames < s.frames) chip(`processed: ${num(s.proc_range.frames)} frames`);
@@ -321,12 +329,11 @@ async function buildExport() {
   const pr = S.summary.proc_range, nEv = (pr ? pr.frames : S.summary.frames) * 2;
   if ($('xWave').checked && nEv * 2100 > 1.5e9) { toast('With waveforms the files would exceed 1.5 GB: narrow the time window or leave Samples out', 7000); return; }
   $('xBuild').disabled = true; $('xOut').textContent = 'building…';
-  await new Promise(r => setTimeout(r, 30));
-  const t0 = performance.now();
+  const t0 = performance.now(), poll = watchProgress($('xOut'), 'building…', t0);
   try {
     S.exported = await api('/api/export/compass', { per_channel: $('xPerCh').checked, filtered: $('xFiltered').checked, waveforms: $('xWave').checked, cfd: $('xCfd').checked, energy_scale: $('xScale').value === 'auto' ? null : +$('xScale').value });
-  } catch (e) { $('xOut').textContent = ''; toast('Could not build: ' + e.message, 6000); $('xBuild').disabled = false; return; }
-  $('xBuild').disabled = false;
+  } catch (e) { clearInterval(poll); $('xOut').textContent = ''; toast('Could not build: ' + e.message, 6000); $('xBuild').disabled = false; return; }
+  clearInterval(poll); $('xBuild').disabled = false;
   const tot = S.exported.files.reduce((a, f) => a + f.bytes, 0);
   $('xOut').textContent = `${S.exported.files.length} files, ${human(tot)}, ${((performance.now() - t0) / 1000).toFixed(1)} s · energy divisor ${S.exported.energy_scale} (largest Q_long ${fmt(S.exported.q_long_max, 0)})`;
   renderFiles(); renderSteps();
@@ -343,7 +350,7 @@ function downloadZip() {
   const run = (S.summary.name || 'run').replace(/[^A-Za-z0-9_.-]+/g, '_');
   const entries = x.files.map(f => ({ name: `${run}/${f.folder}/${f.name}`, parts: f.parts }));
   entries.push({ name: `${run}/settings.json`, parts: JSON.stringify(x.settings, null, 2) }, { name: `${run}/run.info`, parts: x.run_info });
-  download(`${run}_compass.zip`, ZipStore.build(entries), 'application/zip');
+  download(`${run}_root.zip`, ZipStore.build(entries), 'application/zip');
 }
 
 // ------------------------------------------------------------------ wiring

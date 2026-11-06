@@ -1,6 +1,6 @@
 # NOVO-BE
 
-A single-page web app that turns raw frames from the NOVO detector backend into CoMPASS-style ROOT files. Everything runs in the browser: nothing is uploaded to a server.
+A single-page web app that turns raw frames from the NOVO detector backend into ROOT files. Everything runs in the browser: nothing is uploaded to a server.
 
 **Open it:** https://asumankolbasi.github.io/novo-be/ (or clone the repository and open `index.html`).
 
@@ -14,7 +14,7 @@ A single-page web app that turns raw frames from the NOVO detector backend into 
 
 ## Output
 
-The files follow the CoMPASS layout, so existing CoMPASS analysis macros read them unchanged:
+The layout is the one of CAEN CoMPASS (trees `Data_R` / `Data_F`, same branch names and types), so analysis macros written for CoMPASS read these files unchanged:
 
 ```
 <run>/RAW/DataR_CH0@NOVO_<id>_<run>.root        TTree Data_R  – every frame of the selected window
@@ -38,7 +38,9 @@ PSD = (Energy − EnergyShort) / Energy. The divisor (1 by default, powers of tw
 
 ## Input
 
-Raw DMA captures of the NOVO backend: 4096-byte frames with a 32-byte header (detector id, 64-bit timestamp at 1.3 GHz, packet counter) followed by 1012 samples per channel, interleaved in blocks of four. Both DMA files of a run are merged by timestamp. Runs up to a few hundred MB are fine in a browser.
+Raw DMA captures of the NOVO backend: 4096-byte frames with a 32-byte header (detector id, 64-bit timestamp at 1.3 GHz, packet counter) followed by 1012 samples per channel, interleaved in blocks of four. Both DMA files of a run are merged by timestamp.
+
+Files are streamed, never loaded whole: opening a run scans the headers (about 100 bytes of memory per frame), processing reads the selected time window in 16 MB chunks through a pool of Web Workers and keeps only the per-frame results, and single waveforms are read from disk on demand. Multi-GB runs are fine; a 5.8 GB run (1.4 million frames) opens in seconds and processes in well under a minute on a laptop.
 
 ## Files
 

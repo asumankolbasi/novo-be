@@ -37,7 +37,7 @@
         <h2>Raw data</h2>
         <div class="drop" id="dropZone">
           <div>Drop <b>dma0.bin</b>, <b>dma1.bin</b> and <b>meta.json</b> of one run here, or <label class="link">choose them<input type="file" id="upInput2" multiple accept=".bin,.json,application/json,application/octet-stream" hidden></label>.</div>
-          <div class="muted small">Nothing is uploaded anywhere: decoding, pulse processing and ROOT writing all happen in your browser. Suitable for runs up to a few hundred MB.</div>
+          <div class="muted small">Nothing is uploaded anywhere: decoding, pulse processing and ROOT writing all happen in your browser. Files are streamed from disk, so multi-GB runs work: only the frame headers and the per-frame results are kept in memory.</div>
         </div>
         <div class="bar" id="runBar" hidden>
           <label>Run <select id="runSelect"></select></label>
@@ -48,13 +48,12 @@
       <div class="panel">
         <h2>Workflow</h2>
         <ol class="howto">
-          <li><b>Data:</b> load the DMA files of a run; only the frame headers are read at this point.</li>
+          <li><b>Data:</b> load the DMA files of a run; the files are scanned once for their frame headers (disk speed, a few seconds per GB).</li>
           <li><b>Time:</b> drag horizontally on the count-rate plot to select the time range of interest (e.g. beam on), then <i>Process window</i>.</li>
           <li><b>Waveform:</b> drag the short/long gate bands and the threshold line, then <i>Apply and process</i>.</li>
           <li><b>PSD:</b> set the n/γ cut on the PSD–energy map by dragging the red line or taking it from the fit.</li>
-          <li><b>Save:</b> build CoMPASS-style ROOT files (<code>Data_R</code> / <code>Data_F</code> trees) and download them.</li>
+          <li><b>Save:</b> build the ROOT files and download them.</li>
         </ol>
-        <p class="muted small">The output tree has the same branches as CoMPASS: <code>Channel/s Timestamp/l Board/s Energy/s EnergyShort/s Flags/i</code> plus the optional <code>Samples</code> (TArrayS) waveform, so existing CoMPASS macros work unchanged.</p>
       </div>
     </div>
   </section>
@@ -154,7 +153,7 @@
     <div class="readout">
       <div class="panel"><h2>File layout</h2>
         <div class="form compact">
-          <label><span><input type="checkbox" id="xPerCh" checked> One file per channel (as CoMPASS)</span><span class="hint">DataR_CH0@NOVO_&lt;id&gt;_&lt;run&gt;.root and DataR_CH1@…; unchecked: both channels in one file, separated by the Channel branch.</span></label>
+          <label><span><input type="checkbox" id="xPerCh" checked> One file per channel</span><span class="hint">DataR_CH0@NOVO_&lt;id&gt;_&lt;run&gt;.root and DataR_CH1@…; unchecked: both channels in one file, separated by the Channel branch.</span></label>
           <label><span><input type="checkbox" id="xFiltered" checked> Also write filtered Data_F files</span><span class="hint">RAW/ holds every frame of the selected window (Data_R); FILTERED/ holds the events passing the filters below (Data_F).</span></label>
           <label><span><input type="checkbox" id="xWave"> Include waveforms (Samples, TArrayS)</span><span class="hint">1012 samples ≈ 2 KB per event; about 100× larger files.</span></label>
           <label><span><input type="checkbox" id="xCfd" checked> Add the CFD fine time to the timestamp</span><span class="hint">Timestamp (ps) = frame time + CFD crossing time of the pulse; unchecked: the trigger sample (500) is used.</span></label>
@@ -180,7 +179,7 @@
     </div>
     <div class="tablewrap short" id="xFilesWrap" hidden><table class="t" id="xFiles"><thead><tr><th>Folder</th><th>File</th><th>Tree</th><th>Events</th><th>Size</th><th></th></tr></thead><tbody></tbody></table></div>
     <div class="readout">
-      <div class="panel"><h2>Tree layout (same as CoMPASS)</h2>
+      <div class="panel"><h2>Tree layout</h2>
         <table class="t ref"><thead><tr><th>Branch</th><th>Type</th><th>Content</th></tr></thead><tbody>
           <tr><td>Channel</td><td>UShort_t</td><td>0 / 1: the SiPM at either end of the bar</td></tr>
           <tr><td>Timestamp</td><td>ULong64_t</td><td>picoseconds from the first sample of the first frame of the run</td></tr>
@@ -203,7 +202,7 @@ for (Long64_t i = 0; i &lt; t->GetEntries(); i++) {
   double psd = en ? double(en - es) / en : 0;   // (Q_long - Q_short) / Q_long
 }
 t->Draw("(Energy-EnergyShort)/Energy:Energy", "!(Flags&amp;4)", "colz");</pre>
-        <p class="muted small"><code>settings.json</code> (gates, threshold, cut, filters, flag definitions) and <code>run.info</code> are written next to the files. For waveforms: <code>TArrayS* s = nullptr; t->SetBranchAddress("Samples", &amp;s);</code></p>
+        <p class="muted small">The layout follows CAEN CoMPASS (trees <code>Data_R</code> / <code>Data_F</code>, same branch names and types), so analysis macros written for CoMPASS read these files unchanged. <code>settings.json</code> (gates, threshold, cut, filters, flag definitions) and <code>run.info</code> are written next to the files. For waveforms: <code>TArrayS* s = nullptr; t->SetBranchAddress("Samples", &amp;s);</code></p>
       </div>
     </div>
   </section>
