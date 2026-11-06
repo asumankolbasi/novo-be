@@ -10,7 +10,8 @@ A single-page web app that turns raw frames from the NOVO detector backend into 
 2. **Time** – select the time range of interest on the count-rate plot and process it.
 3. **Waveform** – browse single frames; drag the short/long gate bands and the threshold line to tune the charge integration.
 4. **PSD** – look at the PSD–energy map and set the n/γ cut: by hand, from the two-Gaussian fit, or as an energy-dependent curve fitted slice by slice.
-5. **Save** – build the ROOT files and download them one by one or as a ZIP, together with `settings.json` and `run.info`.
+5. **Energy** – uncalibrated spectra (Q_long per end or √(Q0·Q1)), all events or gamma / neutron separately.
+6. **Save** – build the ROOT files and download them one by one or as a ZIP, together with `settings.json` and `run.info`.
 
 ## Output
 

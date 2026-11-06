@@ -78,7 +78,8 @@ async function closeRun() {
   if (S.playing) togglePlay();
   await api('/api/close', {});
   S.summary = null; S.params = null; S.cur = 0; S.pending = null; S.lastFit = null; S.exported = null; S.waveAuto = false;
-  for (const id of ['wavePlot', 'psd2dPlot', 'psd1dPlot', 'ratePlot', 'dtPlot']) { try { Plotly.purge(id); } catch (_) { /* not drawn */ } }
+  for (const id of ['wavePlot', 'psd2dPlot', 'psd1dPlot', 'ratePlot', 'dtPlot', 'energyPlot']) { try { Plotly.purge(id); } catch (_) { /* not drawn */ } }
+  $('eInfo').textContent = '';
   for (const id of ['pFit', 'pCounts', 'dInfo']) $(id).innerHTML = '';
   $('wRes').tBodies[0].innerHTML = ''; $('xFiles').tBodies[0].innerHTML = ''; $('xFilesWrap').hidden = true; $('xOut').textContent = '';
   for (const id of ['xZip', 'xSettings', 'xInfo']) $(id).hidden = true;
@@ -160,9 +161,9 @@ function setTab(name) {
 }
 function refreshTab(name) {
   if (!hasRun()) { if (name !== 'data') toast('Load a run first'); return; }
-  if (!S.summary.processed && (name === 'psd' || name === 'save')) { toast('Run not processed yet: pick the window on the Time tab and press "Process window"', 5000); return; }
+  if (!S.summary.processed && (name === 'psd' || name === 'energy' || name === 'save')) { toast('Run not processed yet: pick the window on the Time tab and press "Process window"', 5000); return; }
   if (name === 'wave' && !S.waveAuto) { S.waveAuto = true; goValid(1, true); return; }     // first visit: jump to the first valid pulse
-  ({ data: renderInfo, time: refreshTime, wave: refreshWave, psd: refreshPsd, save: refreshSave })[name]();
+  ({ data: renderInfo, time: refreshTime, wave: refreshWave, psd: refreshPsd, energy: refreshEnergy, save: refreshSave })[name]();
 }
 
 // ------------------------------------------------------------------ time tab
@@ -355,6 +356,27 @@ async function applyCut(v) {
   S.params = await api('/api/params', { psd_cut: v }); S.summary = await api('/api/summary'); S.exported = null; renderChips(); $('pCut').value = v; refreshPsd();
 }
 
+// ------------------------------------------------------------------ energy tab (visual only, no calibration)
+async function refreshEnergy() {
+  const chSel = $('eCh').value, sel = $('eSel').value, nbins = +$('eBins').value || 512, logy = $('eLog').checked;
+  const chans = chSel === 'both' ? [0, 1] : [+chSel], parts = sel === 'split' ? [['gamma', 'γ'], ['neutron', 'n']] : [[sel, '']];
+  const traces = [], info = [];
+  let range = null;
+  for (const ch of chans) {
+    for (const [s, lab] of parts) {
+      const h = await api(`/api/hist/energy?ch=${ch}&nbins=${nbins}&sel=${s}` + (range ? `&lo=${range[0]}&hi=${range[1]}` : ''));
+      if (!range) range = [h.lo, h.hi];
+      const color = sel === 'split' ? css(s === 'gamma' ? '--gamma' : '--neutron') : chSel === 'both' ? chColor(ch) : css('--accent');
+      const name = (chSel === 'both' ? `CH${ch}` : ch === 2 ? 'both ends' : `CH${ch}`) + (lab ? ' ' + lab : '');
+      traces.push({ ...stepXY(h.edges, h.counts), type: 'scatter', mode: 'lines', line: { shape: 'hv', color, width: 1.4 }, name: `${name} (${num(h.n)})`, hovertemplate: '%{x:.0f}: %{y}<extra>' + name + '</extra>' });
+      if (s === parts[0][0]) info.push(`${chSel === 'both' ? 'CH' + ch : ch === 2 ? 'both ends' : 'CH' + ch}: ${num(h.valid)} events · n ${num(h.neutrons)} (${h.valid ? (100 * h.neutrons / h.valid).toFixed(1) : 0} %) · γ ${num(h.gammas)}`);
+    }
+  }
+  const xlab = chSel === '2' ? '√(Q0·Q1) (channels)' : 'Q long (channels)';
+  await Plotly.react('energyPlot', traces, layout({ xaxis: { title: { text: xlab } }, yaxis: { title: { text: 'counts' }, type: logy ? 'log' : 'linear', dtick: logy ? 1 : undefined, exponentformat: 'none' }, hovermode: 'x', margin: { l: 60, r: 16, t: 30, b: 46 } }), PCFG);
+  $('eInfo').textContent = info.join(' · ');
+}
+
 // ------------------------------------------------------------------ save tab
 function fillFilters() {
   const s = S.summary; if (!s) return;
@@ -443,6 +465,9 @@ function init() {
   });
   $('kMode').addEventListener('change', async () => { try { await api('/api/classifier', { mode: $('kMode').value }); } catch (e) { toast(e.message, 5000); } S.summary = await api('/api/summary'); S.exported = null; renderChips(); refreshPsd(); });
   $('cvFit').addEventListener('click', fitCurve);
+  // energy
+  for (const id of ['eCh', 'eSel', 'eBins', 'eLog']) $(id).addEventListener('change', refreshEnergy);
+  $('eRefresh').addEventListener('click', refreshEnergy);
   // save
   $('fApply').addEventListener('click', applyFilters);
   $('xBuild').addEventListener('click', buildExport);

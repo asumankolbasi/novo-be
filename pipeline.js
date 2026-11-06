@@ -493,6 +493,15 @@ self.onmessage = e => { const { id, buf, n, params } = e.data; try { const res =
     const sgl = singleSource();
     return { ...h, n: p.length, fit: sgl ? null : fitTwoGaussians(h.counts, h.edges), band: sgl ? fitSingleGaussian(h.counts, h.edges) : null, neutrons: nN, gammas: nG, classifier: L.classifier.mode };
   }
+  // energy spectrum of the valid events: Q_long per end, sqrt(Q0*Q1) for both ends; sel = all | gamma | neutron
+  function energyHist(ch, nbins, lo, hi, sel) {
+    const vm = chView(ch).vm, e = energy(ch), nmk = neutronMask(ch);
+    const m = i => vm[i] && (sel === 'neutron' ? nmk[i] : sel === 'gamma' ? !nmk[i] : true);
+    if (lo == null || hi == null) { const [alo, ahi] = autoRange(pick(e, i => vm[i])); lo = lo == null ? alo : lo; hi = hi == null ? ahi : hi; }
+    const x = pick(e, m), h = hist1d(x, nbins, lo, hi); let nn = 0, nv = 0;
+    for (let i = 0; i < vm.length; i++) if (vm[i]) { nv++; if (nmk[i]) nn++; }
+    return { ...h, n: x.length, valid: nv, neutrons: nn, gammas: nv - nn, lo, hi };
+  }
   function timeHists(ch) {
     const vm = validMask(ch), t = tsNs(), tv = pick(t, i => vm[i]);
     let rate = rateCurve(tv);
@@ -637,6 +646,7 @@ self.onmessage = e => { const { id, buf, n, params } = e.data; try { const res =
       if (P === '/api/close') { if (L.name) L.runs.delete(L.name); L.frames = null; L.results = {}; L.name = null; L.meta = null; L.processed = false; L.tsCache = null; return { open: null }; }
       if (P === '/api/summary') { need(); return summary(); }
       if (P === '/api/params') { if (body !== undefined) { const cur = { ...L.params }; for (const [k, v] of Object.entries(body)) if (k in cur) cur[k] = typeof cur[k] === 'string' ? String(v) : +v; const old = L.params; L.params = validated(cur); const skip = ['psd_cut', 'sample_ns', 'ts_ns']; const changed = Object.keys(L.params).some(k => !skip.includes(k) && old[k] !== L.params[k]); if (L.frames && changed && L.processed) L.dirty = true; } return { ...L.params }; }
+      if (P === '/api/hist/energy') { needProc(); return energyHist(num(q, 'ch', 2), num(q, 'nbins', 512), num(q, 'lo', null), num(q, 'hi', null), q.get('sel') || 'all'); }
       if (P === '/api/hist/psd2d') { needProc(); return psd2d(num(q, 'ch', 0), num(q, 'ne', 200), num(q, 'npsd', 160), num(q, 'elo', null), num(q, 'ehi', null), num(q, 'plo', null), num(q, 'phi', null)); }
       if (P === '/api/hist/psd1d') { needProc(); return psd1d(num(q, 'ch', 0), num(q, 'elo', 0), num(q, 'ehi', 1e12), num(q, 'nbins', 160), num(q, 'plo', null), num(q, 'phi', null)); }
       if (P === '/api/classifier') { const b = body || {}; if (b.mode === 'curve' && L.classifier.curve.a == null) throw new Error('fit the curve first'); if (['cut', 'curve', 'gamma_only', 'neutron_only'].includes(b.mode)) L.classifier.mode = b.mode; return { ...L.classifier }; }
