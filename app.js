@@ -8,7 +8,7 @@ const css = name => getComputedStyle(document.documentElement).getPropertyValue(
 const fmt = (v, d = 1) => (v == null || Number.isNaN(v)) ? '—' : Number(v).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: 0 });
 const num = v => Number(v).toLocaleString('en-US');
 const api = (path, body) => localApi(path, body);
-const S = { summary: null, params: null, cur: 0, playing: null, tab: 'data', pending: null, waveRoles: [], lastFit: null, exported: null };
+const S = { summary: null, params: null, cur: 0, playing: null, tab: 'data', pending: null, waveRoles: [], lastFit: null, exported: null, lastMixedMode: 'cut' };
 const NS = 1012;
 
 let toastT = null;
@@ -291,30 +291,54 @@ async function refreshPsd() {
   const winLo = Number.isNaN(elo) ? xr[0] : elo, winHi = Number.isNaN(ehi) ? xr[1] : ehi;
   const cls = (S.summary && S.summary.classifier) || { mode: 'cut' }, single = ['gamma_only', 'neutron_only'].includes(cls.mode) ? cls.mode : null;
   $('pSrc').value = single || 'mixed';
-  for (const id of ['pCut', 'pCutApply', 'pCutFromFit']) $(id).disabled = !!single;
-  const shapes = [{ type: 'line', xref: 'x', yref: 'y', x0: xr[0], x1: xr[1], y0: cut, y1: cut, line: { color: css('--thr'), width: 1.5, dash: 'dash' }, editable: !single, visible: !single }];
+  for (const id of ['pCut', 'pCutApply', 'pCutFromFit', 'kMode', 'cvCrit', 'cvK', 'cvN', 'cvFom', 'cvFit']) $(id).disabled = !!single;
+  if (!single) $('kMode').value = cls.mode === 'curve' ? 'curve' : 'cut';
+  const curveOn = !single && cls.mode === 'curve' && cls.curve && cls.curve.a != null && cls.curve.view === ch;
+  const shapes = [{ type: 'line', xref: 'x', yref: 'y', x0: xr[0], x1: xr[1], y0: cut, y1: cut, line: { color: css('--thr'), width: curveOn ? 0.8 : 1.5, dash: 'dash' }, editable: !curveOn && !single, visible: !curveOn && !single }];
+  const extraTraces = [];
+  if (curveOn) {
+    const cv = cls.curve, xs = []; for (let i = 0; i <= 200; i++) xs.push(xr[0] + (xr[1] - xr[0]) * i / 200);
+    extraTraces.push({ x: xs, y: xs.map(x => x >= cv.emin ? curveAt(cv, x) : null), type: 'scatter', mode: 'lines', line: { color: css('--thr'), width: 2 }, name: 'cut(E)', hovertemplate: 'E %{x:.0f}: cut %{y:.4f}<extra></extra>' });
+    extraTraces.push({ x: [xr[0], cv.emin, cv.emin, xr[0], xr[0]], y: [yr[0], yr[0], yr[1], yr[1], yr[0]], type: 'scatter', mode: 'lines', fill: 'toself', fillcolor: 'rgba(128,128,128,0.25)', line: { width: 0 }, hoverinfo: 'skip', showlegend: false, name: 'not classified' });
+  } else if (!single && cls.mode === 'curve') toast('The curve was fitted on another view: showing the fixed cut here', 3000);
   const winTrace = (!Number.isNaN(elo) || !Number.isNaN(ehi)) ? [{ x: [Math.max(winLo, xr[0]), Math.min(winHi, xr[1]), Math.min(winHi, xr[1]), Math.max(winLo, xr[0]), Math.max(winLo, xr[0])], y: [yr[0], yr[0], yr[1], yr[1], yr[0]], type: 'scatter', mode: 'lines', fill: 'toself', fillcolor: 'rgba(128,128,128,0.18)', line: { color: css('--fg'), width: 1.2, dash: 'dot' }, hoverinfo: 'skip', showlegend: false, name: 'energy window' }] : [];
   await Plotly.react('psd2dPlot', [
     { type: 'heatmap', x: h2.x, y: h2.y, z, customdata: h2.z, colorscale: 'Viridis', showscale: true, hoverongaps: false, colorbar: { title: { text: zlog ? 'log₁₀(N+1)' : 'N' }, thickness: 12, len: 0.8 }, hovertemplate: 'energy %{x:.0f}<br>PSD %{y:.3f}<br>N %{customdata}<extra></extra>' },
-    ...winTrace,
+    ...winTrace, ...extraTraces,
     { x: [xr[0], xr[1]], y: [yr[0], yr[1]], type: 'scatter', mode: 'markers', marker: { opacity: 0 }, hoverinfo: 'skip', showlegend: false, selected: { marker: { opacity: 0 } }, unselected: { marker: { opacity: 0 } } }],
-  layout({ title: { text: `${ch === 2 ? 'Both ends' : 'CH' + ch} · PSD – energy (${num(h2.n)} pulses) · red line = cut · drag horizontally for the energy window`, font: { size: 13 }, x: 0, xanchor: 'left' }, xaxis: { title: { text: `energy (${ch === 2 ? '√(Q0·Q1)' : 'Q long'}, channels)` }, range: xr, fixedrange: true }, yaxis: { title: { text: 'PSD = (Q_long − Q_short) / Q_long' }, range: yr, fixedrange: true }, shapes, dragmode: 'select', selectdirection: 'h', margin: { l: 60, r: 16, t: 34, b: 46 } }), { ...PCFG, edits: { shapePosition: true } });
+  layout({ title: { text: `${ch === 2 ? 'Both ends' : 'CH' + ch} · PSD – energy (${num(h2.n)} pulses) · ${curveOn ? 'energy-dependent cut' : 'red line = cut'} · drag horizontally for the energy window`, font: { size: 13 }, x: 0, xanchor: 'left' }, xaxis: { title: { text: `energy (${ch === 2 ? '√(Q0·Q1)' : 'Q long'}, channels)` }, range: xr, fixedrange: true }, yaxis: { title: { text: 'PSD = (Q_long − Q_short) / Q_long' }, range: yr, fixedrange: true }, shapes, dragmode: 'select', selectdirection: 'h', margin: { l: 60, r: 16, t: 34, b: 46 } }), { ...PCFG, edits: { shapePosition: true } });
   bindCutDrag('psd2dPlot', 'y');
   const hp = $('psd2dPlot');
   if (!hp._selBound) { hp._selBound = true; hp.on('plotly_selected', ev => { if (ev && ev.range && ev.range.x) { const [a, b] = ev.range.x; $('pElo').value = Math.round(Math.max(0, a)); $('pEhi').value = Math.round(b); refreshPsd(); } }); hp.on('plotly_deselect', () => { if ($('pElo').value !== '' || $('pEhi').value !== '') { $('pElo').value = ''; $('pEhi').value = ''; refreshPsd(); } }); }
   const h1 = await api(`/api/hist/psd1d?ch=${ch}&plo=${yr[0]}&phi=${yr[1]}&elo=${winLo}&ehi=${winHi}`);
+  const eMid = Math.max(Math.sqrt(Math.max(winLo, 1) * Math.max(winHi, 1)), 1e-9), cutLine = curveOn ? curveAt(cls.curve, eMid) : cut;
   const traces = [{ ...stepXY(h1.edges, h1.counts), type: 'scatter', mode: 'lines', line: { shape: 'hv', color: chColor(ch), width: 1.4 }, name: 'PSD', hovertemplate: '%{x:.3f}: %{y}<extra></extra>' }];
   const f = h1.fit, band = h1.band, g = (p, x) => p.amp * Math.exp(-0.5 * ((x - p.mu) / p.sigma) ** 2);
   if (band) traces.push({ x: band.centers, y: band.curve, type: 'scatter', mode: 'lines', line: { color: css('--fg'), width: 1 }, name: `single Gaussian μ ${band.mu.toFixed(4)} σ ${band.sigma.toFixed(4)}`, hoverinfo: 'skip' });
   if (f) { traces.push({ x: f.centers, y: f.centers.map(x => g(f.gamma, x)), type: 'scatter', mode: 'lines', line: { color: css('--gamma'), width: 1, dash: 'dot' }, name: 'γ fit', hoverinfo: 'skip' }, { x: f.centers, y: f.centers.map(x => g(f.neutron, x)), type: 'scatter', mode: 'lines', line: { color: css('--neutron'), width: 1, dash: 'dot' }, name: 'n fit', hoverinfo: 'skip' }, { x: f.centers, y: f.curve, type: 'scatter', mode: 'lines', line: { color: css('--fg'), width: 1 }, name: 'sum', hoverinfo: 'skip' }); }
-  Plotly.react('psd1dPlot', traces, layout({ title: { text: `PSD projection · energy ${fmt(winLo, 0)}–${fmt(winHi, 0)}`, font: { size: 13 }, x: 0, xanchor: 'left' }, xaxis: { title: { text: 'PSD' }, range: [h1.edges[0], h1.edges[h1.edges.length - 1]] }, yaxis: { title: { text: 'counts' } }, shapes: single ? [] : [{ type: 'line', xref: 'x', yref: 'paper', x0: cut, x1: cut, y0: 0, y1: 1, line: { color: css('--thr'), width: 1.5, dash: 'dash' }, editable: true }], margin: { l: 60, r: 16, t: 34, b: 46 } }), { ...PCFG, edits: { shapePosition: true } });
+  Plotly.react('psd1dPlot', traces, layout({ title: { text: `PSD projection · energy ${fmt(winLo, 0)}–${fmt(winHi, 0)}`, font: { size: 13 }, x: 0, xanchor: 'left' }, xaxis: { title: { text: 'PSD' }, range: [h1.edges[0], h1.edges[h1.edges.length - 1]] }, yaxis: { title: { text: 'counts' } }, shapes: single ? [] : [{ type: 'line', xref: 'x', yref: 'paper', x0: cutLine, x1: cutLine, y0: 0, y1: 1, line: { color: css('--thr'), width: 1.5, dash: curveOn ? 'dot' : 'dash' }, editable: !curveOn }], margin: { l: 60, r: 16, t: 34, b: 46 } }), { ...PCFG, edits: { shapePosition: true } });
   bindCutDrag('psd1dPlot', 'x');
-  S.lastFit = f;
+  S.lastFit = f; renderCurveTable();
   $('pFit').innerHTML = single ? [['Source', single === 'gamma_only' ? 'gamma only: every event is γ' : 'neutron only: every event is n'], ['Band (single Gaussian)', band ? `μ ${band.mu.toFixed(4)} · σ ${band.sigma.toFixed(4)} · FWHM ${band.fwhm.toFixed(4)}` : 'fit failed']].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')
     : f ? [['FoM', f.fom.toFixed(3) + (f.fom >= 1 ? ' <span class="flag ok">good separation</span>' : f.fom >= 0.7 ? ' <span class="flag warn">fair</span>' : ' <span class="flag bad">poor</span>')], ['γ peak', `μ ${f.gamma.mu.toFixed(4)} · FWHM ${f.gamma.fwhm.toFixed(4)}`], ['n peak', `μ ${f.neutron.mu.toFixed(4)} · FWHM ${f.neutron.fwhm.toFixed(4)}`], ['Fit crossing', ((f.gamma.mu * f.neutron.sigma + f.neutron.mu * f.gamma.sigma) / (f.gamma.sigma + f.neutron.sigma)).toFixed(4)]].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')
       : '<dt>Fit</dt><dd>not possible (too few pulses or a single peak)</dd>';
   const tot = h1.neutrons + h1.gammas;
-  $('pCounts').innerHTML = [['Pulses in window', num(tot)], ['Neutrons (' + (single ? 'source setting' : 'PSD > ' + cut) + ')', `${num(h1.neutrons)} (${tot ? (100 * h1.neutrons / tot).toFixed(1) : 0} %)`], ['Gammas', `${num(h1.gammas)} (${tot ? (100 * h1.gammas / tot).toFixed(1) : 0} %)`], ['n/γ ratio', h1.gammas ? (h1.neutrons / h1.gammas).toFixed(3) : '—']].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+  $('pCounts').innerHTML = [['Pulses in window', num(tot)], ['Neutrons (' + (single ? 'source setting' : cls.mode === 'curve' ? 'curve' : 'PSD > ' + cut) + ')', `${num(h1.neutrons)} (${tot ? (100 * h1.neutrons / tot).toFixed(1) : 0} %)`], ['Gammas', `${num(h1.gammas)} (${tot ? (100 * h1.gammas / tot).toFixed(1) : 0} %)`], ['n/γ ratio', h1.gammas ? (h1.neutrons / h1.gammas).toFixed(3) : '—']].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+}
+// cut(E) = a + b/√E + c/E, held constant outside the fitted energy span [emin, emax] (same as the pipeline)
+function curveAt(cv, e) { let x = Math.max(e, 1e-9); if (cv.emin) x = Math.max(x, cv.emin); if (cv.emax) x = Math.min(x, cv.emax); return cv.a + cv.b / Math.sqrt(x) + cv.c / x; }
+function renderCurveTable() {
+  const cls = S.summary && S.summary.classifier, cv = cls && cls.curve, tb = $('cvTable').tBodies[0];
+  if (!cv || !cv.points || !cv.points.length) { tb.innerHTML = ''; $('cvOut').textContent = cls && cls.mode === 'curve' ? 'curve not fitted yet' : ''; return; }
+  tb.innerHTML = cv.points.map(pt => `<tr${pt.ok ? '' : ' style="opacity:.5"'}><td>${fmt(pt.elo, 0)}–${fmt(pt.ehi, 0)}</td><td>${num(pt.n)}</td><td>${pt.mu_g == null ? '—' : pt.mu_g.toFixed(4)}</td><td>${pt.sig_g == null ? '—' : pt.sig_g.toFixed(4)}</td><td>${pt.mu_n == null ? '—' : pt.mu_n.toFixed(4)}</td><td>${pt.sig_n == null ? '—' : pt.sig_n.toFixed(4)}</td><td>${pt.fom == null ? '—' : pt.fom.toFixed(2)}</td><td>${pt.cut == null ? '—' : pt.cut.toFixed(4)}</td><td>${pt.n_frac == null ? '—' : (100 * pt.n_frac).toFixed(1)}</td><td>${pt.ok ? '<span class="flag ok">in fit</span>' : '<span class="flag" title="' + (pt.why || '') + (pt.impr != null ? ' · χ² improvement ' + (100 * pt.impr).toFixed(0) + ' %, Δχ² ' + pt.dchi2.toFixed(0) : '') + '">' + (pt.why || 'excluded') + '</span>'}</td></tr>`).join('');
+  $('cvCrit').value = cv.criterion; $('cvK').value = cv.k;
+  $('cvOut').textContent = cv.a == null ? '' : `cut(E) = ${cv.a.toFixed(4)} + ${cv.b.toFixed(2)}/√E + ${cv.c.toFixed(1)}/E · valid for E ≥ ${fmt(cv.emin, 0)}${cv.emax ? ', constant above ' + fmt(cv.emax, 0) : ''} · view ${cv.view === 2 ? 'both ends' : 'CH' + cv.view} · criterion ${cv.criterion} (k = ${cv.k}) · residual rms ${cv.rms.toFixed(4)}` + (cls.mode === 'curve' ? ' · active' : ' · not active (classification: ' + cls.mode + ')');
+}
+async function fitCurve() {
+  const body = { view: +$('pCh').value, criterion: $('cvCrit').value, k: parseFloat($('cvK').value) || 3, nslices: parseInt($('cvN').value, 10) || 10, min_fom: parseFloat($('cvFom').value) || 0.5 };
+  $('cvOut').textContent = 'fitting…';
+  try { await api('/api/classifier/curve', body); } catch (e) { $('cvOut').textContent = 'fit failed: ' + e.message; toast('Curve fit failed: ' + e.message, 6000); return; }
+  S.summary = await api('/api/summary'); S.exported = null; renderChips(); toast('Energy-dependent cut active'); refreshPsd();
 }
 function bindCutDrag(id, axis) {
   const el = $(id); if (el._cutBound) return; el._cutBound = true;
@@ -403,7 +427,14 @@ function init() {
   $('pCutApply').addEventListener('click', () => applyCut(parseFloat($('pCut').value)));
   $('pCut').addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); applyCut(parseFloat($('pCut').value)); } });
   $('pCutFromFit').addEventListener('click', () => { const f = S.lastFit; if (!f) { toast('A fit is needed first'); return; } applyCut(+((f.gamma.mu * f.neutron.sigma + f.neutron.mu * f.gamma.sigma) / (f.gamma.sigma + f.neutron.sigma)).toFixed(4)); });
-  $('pSrc').addEventListener('change', async () => { await api('/api/classifier', { mode: $('pSrc').value === 'mixed' ? 'cut' : $('pSrc').value }); S.summary = await api('/api/summary'); S.exported = null; renderChips(); refreshPsd(); });
+  $('pSrc').addEventListener('change', async () => {
+    const v = $('pSrc').value, cur = S.summary && S.summary.classifier ? S.summary.classifier.mode : 'cut';
+    try { if (v === 'mixed') await api('/api/classifier', { mode: S.lastMixedMode || 'cut' }); else { if (!['gamma_only', 'neutron_only'].includes(cur)) S.lastMixedMode = cur; await api('/api/classifier', { mode: v }); } }
+    catch (e) { toast(e.message, 5000); await api('/api/classifier', { mode: v === 'mixed' ? 'cut' : v }); }
+    S.summary = await api('/api/summary'); S.exported = null; renderChips(); refreshPsd();
+  });
+  $('kMode').addEventListener('change', async () => { try { await api('/api/classifier', { mode: $('kMode').value }); } catch (e) { toast(e.message, 5000); } S.summary = await api('/api/summary'); S.exported = null; renderChips(); refreshPsd(); });
+  $('cvFit').addEventListener('click', fitCurve);
   // save
   $('fApply').addEventListener('click', applyFilters);
   $('xBuild').addEventListener('click', buildExport);

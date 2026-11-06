@@ -339,7 +339,8 @@ self.onmessage = e => { const { id, buf, n, params } = e.data; try { const res =
 
   // ================================================================ run state
   const L = { runs: new Map(), name: null, meta: null, frames: null, params: validated(DEFAULT_PARAMS), results: {}, processed: false, dirty: false, procRange: null, processMs: 0, tsCache: null,
-    coinc: { enabled: true, window_ns: 3.0, center_ns: 0 }, twin: { enabled: false, t0_s: null, t1_s: null }, excludePileup: true, classifier: { mode: 'cut' } };
+    coinc: { enabled: true, window_ns: 3.0, center_ns: 0 }, twin: { enabled: false, t0_s: null, t1_s: null }, excludePileup: true,
+    classifier: { mode: 'cut', curve: { a: null, b: 0, c: 0, emin: 0, emax: null, view: 2, estimator: 'gmean', criterion: 'gamma_k', k: 3, points: [] } } };
   const need = () => { if (!L.frames) throw new Error('Open a run first'); };
   const needProc = () => { need(); if (!L.processed) throw new Error('Run not processed yet: pick the time window on the Time tab and press "Process window"'); };
   function tsNs() {
@@ -387,11 +388,11 @@ self.onmessage = e => { const { id, buf, n, params } = e.data; try { const res =
       await Promise.all(inflight);
       if (failure) throw failure;
     } finally { clearProgress(); }
-    L.results = full; L.processed = true; L.dirty = false; L.procRange = [i0, i1]; L.processMs = (typeof performance !== 'undefined' ? performance : Date).now() - t;
+    L.results = full; L.processed = true; L.dirty = false; L.procRange = [i0, i1]; if (L.classifier.mode === 'curve') L.classifier.mode = 'cut'; L.classifier.curve = { ...L.classifier.curve, a: null, points: [] }; L.processMs = (typeof performance !== 'undefined' ? performance : Date).now() - t;
     return summary();
   }
   function gmean() { const a = L.results[0].qlong, b = L.results[1].qlong, out = new Float32Array(a.length); for (let i = 0; i < a.length; i++) out[i] = Math.sqrt(Math.max(a[i], 0) * Math.max(b[i], 0)); return out; }
-  const energy = ch => ch === 2 ? gmean() : L.results[ch].qlong;
+  const energy = (ch, est) => (ch === 2 || est === 'gmean') ? gmean() : L.results[ch].qlong;
   function pick(arr, mask) { const out = []; for (let i = 0; i < arr.length; i++) if (mask(i)) out.push(arr[i]); return out; }
   function coincMask() {
     const r0 = L.results[0], r1 = L.results[1], n = L.frames.n, m = new Uint8Array(n), center = L.coinc.center_ns || 0, w = L.coinc.window_ns;
@@ -417,8 +418,45 @@ self.onmessage = e => { const { id, buf, n, params } = e.data; try { const res =
   function neutronMask(ch) {
     const n = L.frames.n, out = new Uint8Array(n), psd = chView(ch).psd;
     if (singleSource()) { if (L.classifier.mode === 'neutron_only') for (let i = 0; i < n; i++) out[i] = Number.isFinite(psd[i]) ? 1 : 0; return out; }
+    if (L.classifier.mode === 'curve' && L.classifier.curve.a != null) {       // energy-dependent cut, evaluated on the view it was fitted on
+      const cv = L.classifier.curve, v = chView(cv.view), e = energy(cv.view, cv.estimator);
+      for (let i = 0; i < n; i++) out[i] = Number.isFinite(v.psd[i]) && e[i] >= cv.emin && v.psd[i] > curveVal(cv, e[i]) ? 1 : 0;
+      return out;
+    }
     const cut = L.params.psd_cut; for (let i = 0; i < n; i++) out[i] = Number.isFinite(psd[i]) && psd[i] > cut ? 1 : 0;
     return out;
+  }
+  // ---------------------------------------------------------------- energy-dependent cut: cut(E) = a + b/sqrt(E) + c/E
+  // Two-Gaussian fits in logarithmic energy slices over the whole energy range; a slice enters the fit only when the
+  // two peaks are clearly separated (FoM, chi2 improvement over one Gaussian, peaks inside the PSD range and not too
+  // wide, minority component >= 3 % and 50 events). At least three contiguous accepted slices are required; the curve
+  // is held constant below the first accepted slice (events there are not classified -> gamma) and above the last.
+  const curveVal = (cv, e) => { let x = Math.max(e, 1e-9); if (cv.emin) x = Math.max(x, cv.emin); if (cv.emax) x = Math.min(x, cv.emax); return cv.a + cv.b / Math.sqrt(x) + cv.c / x; };
+  const chi2Improvement = (counts, two, one) => { if (!one) return null; let c1 = 0, c2 = 0; for (let i = 0; i < counts.length; i++) { const w = Math.max(counts[i], 1); c1 += (counts[i] - one.curve[i]) ** 2 / w; c2 += (counts[i] - two.curve[i]) ** 2 / w; } return [c1 > 0 ? 1 - c2 / c1 : 0, c1 - c2]; };
+  const sliceReason = (f, cut, n, minFom, plo, phi, chi) => { const g = f.gamma, nn = f.neutron; if (f.fom < minFom) return 'FoM too low'; if (chi != null && (chi[1] < 25 || chi[0] < 0.5)) return 'one Gaussian is enough'; if (g.mu < 0 || nn.mu > 1 || g.mu < plo || nn.mu > phi) return 'peak outside the PSD range'; if (Math.max(g.sigma, nn.sigma) > 0.25 * (phi - plo)) return 'peak too wide'; const wg = g.amp * g.sigma, wn = nn.amp * nn.sigma, comp = wg + wn > 0 ? wn / (wg + wn) : 0, mino = Math.min(comp, 1 - comp); if (mino < 0.03 || mino * n < 50) return 'minority component too small'; if (!(cut > plo && cut < phi)) return 'cut outside the range'; return null; };
+  function fitCurve(view, criterion, k, nslices, minFom) {
+    const estimator = view === 2 ? 'gmean' : 'qlong';
+    const cv = chView(view), e = energy(view, estimator), psd = cv.psd;
+    const sel = i => cv.vm[i] && Number.isFinite(psd[i]) && e[i] > 0;
+    const es = pick(e, sel); if (es.length < 500) throw new Error('not enough events');
+    const lo = Math.max(percentile(es, 0.5), 1), hi = percentile(es, 99.5), [plo, phi] = psdAutoRange(view), points = [];
+    for (let s_ = 0; s_ < nslices; s_++) {
+      const a = 10 ** (Math.log10(lo) + (Math.log10(hi) - Math.log10(lo)) * s_ / nslices), b = 10 ** (Math.log10(lo) + (Math.log10(hi) - Math.log10(lo)) * (s_ + 1) / nslices);
+      const ps = pick(psd, i => sel(i) && e[i] >= a && e[i] < b), pt = { elo: a, ehi: b, ec: Math.sqrt(a * b), n: ps.length, ok: false };
+      if (ps.length >= 200) { const h = hist1d(ps, 120, plo, phi), f = fitTwoGaussians(h.counts, h.edges); if (f && f.neutron.mu > f.gamma.mu) { const g = f.gamma, nn = f.neutron; const cut = criterion === 'midpoint' ? (g.mu * nn.sigma + nn.mu * g.sigma) / (g.sigma + nn.sigma) : criterion === 'neutron_k' ? nn.mu - k * nn.sigma : g.mu + k * g.sigma; const nFrac = ps.filter(v => v > cut).length / ps.length, chi = chi2Improvement(h.counts, f, fitSingleGaussian(h.counts, h.edges)), why = sliceReason(f, cut, ps.length, minFom, plo, phi, chi); Object.assign(pt, { ok: why === null, why, fom: f.fom, mu_g: g.mu, sig_g: g.sigma, mu_n: nn.mu, sig_n: nn.sigma, cut, n_frac: nFrac, impr: chi ? chi[0] : null, dchi2: chi ? chi[1] : null }); } else pt.why = 'two peaks not found'; } else pt.why = 'too few events';
+      points.push(pt);
+    }
+    const good = points.filter(p => p.ok); let best = 0, run = 0; for (const p of points) { run = p.ok ? run + 1 : 0; best = Math.max(best, run); }
+    if (good.length < 3 || best < 3) throw new Error(`not enough contiguous separated slices (${good.length} slices, longest run ${best}; FoM threshold ${minFom.toFixed(1)})`);
+    const useC = good.length >= 5, m = useC ? 3 : 2, A = Array.from({ length: m }, () => new Array(m).fill(0)), bvec = new Array(m).fill(0);
+    for (const pt of good) { const w2 = pt.n, row = [1, 1 / Math.sqrt(pt.ec), 1 / pt.ec].slice(0, m); for (let r = 0; r < m; r++) { bvec[r] += w2 * row[r] * pt.cut; for (let c = 0; c < m; c++) A[r][c] += w2 * row[r] * row[c]; } }
+    for (let c = 0; c < m; c++) { let piv = c; for (let r = c + 1; r < m; r++) if (Math.abs(A[r][c]) > Math.abs(A[piv][c])) piv = r; [A[c], A[piv]] = [A[piv], A[c]]; [bvec[c], bvec[piv]] = [bvec[piv], bvec[c]]; for (let r = 0; r < m; r++) if (r !== c) { const f = A[r][c] / A[c][c]; for (let k2 = c; k2 < m; k2++) A[r][k2] -= f * A[c][k2]; bvec[r] -= f * bvec[c]; } }
+    const coef = bvec.map((v, i) => v / A[i][i]), curve = { a: coef[0], b: coef[1], c: useC ? coef[2] : 0, emin: Math.min(...good.map(p => p.elo)), emax: Math.max(...good.map(p => p.ehi)), view, estimator, criterion, k, points };
+    curve.rms = Math.sqrt(good.reduce((acc, p) => acc + (curveVal(curve, p.ec) - p.cut) ** 2, 0) / good.length);
+    const wkey = criterion === 'neutron_k' ? 'sig_n' : 'sig_g', sg = good.map(p => p[wkey]).sort((x, y) => x - y), mid = sg.length >> 1, tol = sg.length % 2 ? sg[mid] : 0.5 * (sg[mid - 1] + sg[mid]);
+    if (curve.rms > tol) throw new Error(`the curve does not follow the slices (rms ${curve.rms.toFixed(4)} > sigma ${tol.toFixed(4)})`);
+    for (let i = 0; i < 32; i++) { const v = curveVal(curve, curve.emin * (curve.emax / curve.emin) ** (i / 31)); if (v < plo || v > phi) throw new Error('the curve leaves the PSD range'); }
+    return curve;
   }
   function summary() {
     need(); const f = L.frames, dur = duration();
@@ -550,7 +588,7 @@ self.onmessage = e => { const { id, buf, n, params } = e.data; try { const res =
       timestamp: { unit: 'ps', zero: 'first sample of the first frame of the run', timestamp_tick_ps: tickPs, sample_ps: sampPs, trigger_sample: TRIGGER_SAMPLE, cfd_fine_time: cfd, note: cfd ? 'frame time + CFD crossing time of the pulse (per channel); frames without a pulse use the trigger sample' : 'frame time + trigger sample' },
       energy: { Energy: 'Q_long / divisor', EnergyShort: 'Q_short / divisor', divisor: scale, q_unit: 'sum of baseline-subtracted 14-bit ADC codes over the gate (code·sample)', q_long_max: qmax, psd: '(Energy - EnergyShort) / Energy' },
       pulse: { polarity: pol, baseline_samples: p.baseline_samples, threshold_codes: p.threshold, cfd_fraction: p.cfd_fraction, pre_gate_samples: p.pre_gate, short_gate_samples: p.short_gate, long_gate_samples: p.long_gate, short_gate_ns: p.short_gate * p.sample_ns, long_gate_ns: p.long_gate * p.sample_ns, pre_gate_ns: p.pre_gate * p.sample_ns, gate_start: 'floor(t0) + 1 - pre_gate' },
-      classifier: { mode: L.classifier.mode, psd_cut: p.psd_cut },
+      classifier: { mode: L.classifier.mode, psd_cut: p.psd_cut, curve: L.classifier.mode === 'curve' ? { ...L.classifier.curve, formula: 'neutron if PSD > a + b/sqrt(E) + c/E for E >= emin (E clamped to [emin, emax]); E = sqrt(Q0*Q1) for view 2, Q_long otherwise' } : null },
       filters_for_Data_F: { valid_pulse: true, exclude_pileup: L.excludePileup, coincidence: { ...L.coinc }, time_window: { ...L.twin } },
       flags: Object.fromEntries(Object.entries(FLAG_BITS).map(([k, v]) => ['0x' + (+k).toString(16), v])),
       samples: wave ? { branch: 'Samples', type: 'TArrayS', length: NS, unit: 'signed 14-bit ADC code', sample_ps: sampPs } : null,
@@ -595,7 +633,8 @@ self.onmessage = e => { const { id, buf, n, params } = e.data; try { const res =
       if (P === '/api/params') { if (body !== undefined) { const cur = { ...L.params }; for (const [k, v] of Object.entries(body)) if (k in cur) cur[k] = typeof cur[k] === 'string' ? String(v) : +v; const old = L.params; L.params = validated(cur); const skip = ['psd_cut', 'sample_ns', 'ts_ns']; const changed = Object.keys(L.params).some(k => !skip.includes(k) && old[k] !== L.params[k]); if (L.frames && changed && L.processed) L.dirty = true; } return { ...L.params }; }
       if (P === '/api/hist/psd2d') { needProc(); return psd2d(num(q, 'ch', 0), num(q, 'ne', 200), num(q, 'npsd', 160), num(q, 'elo', null), num(q, 'ehi', null), num(q, 'plo', null), num(q, 'phi', null)); }
       if (P === '/api/hist/psd1d') { needProc(); return psd1d(num(q, 'ch', 0), num(q, 'elo', 0), num(q, 'ehi', 1e12), num(q, 'nbins', 160), num(q, 'plo', null), num(q, 'phi', null)); }
-      if (P === '/api/classifier') { const b = body || {}; if (['cut', 'gamma_only', 'neutron_only'].includes(b.mode)) L.classifier.mode = b.mode; return { ...L.classifier }; }
+      if (P === '/api/classifier') { const b = body || {}; if (b.mode === 'curve' && L.classifier.curve.a == null) throw new Error('fit the curve first'); if (['cut', 'curve', 'gamma_only', 'neutron_only'].includes(b.mode)) L.classifier.mode = b.mode; return { ...L.classifier }; }
+      if (P === '/api/classifier/curve') { needProc(); const b = body || {}; L.classifier.curve = fitCurve(+(b.view ?? 2), b.criterion || 'gamma_k', +(b.k ?? 3), +(b.nslices ?? 10), +(b.min_fom ?? 0.5)); L.classifier.mode = 'curve'; return { ...L.classifier }; }
       if (P === '/api/hist/time') { need(); return timeHists(num(q, 'ch', 0)); }
       if (P.startsWith('/api/waveform/')) { need(); return waveform(parseInt(P.slice('/api/waveform/'.length), 10)); }
       if (P === '/api/next_valid') { need(); return { i: nextValid(num(q, 'i', 0), num(q, 'ch', 0), num(q, 'step', 1)) }; }

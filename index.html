@@ -145,7 +145,19 @@
       <div class="panel"><h2>Separation quality (selected energy window)</h2><dl id="pFit"></dl></div>
       <div class="panel"><h2>Counts</h2><dl id="pCounts"></dl></div>
     </div>
-    <div class="hint muted small">The cut is not applied to the ROOT output: every event is stored with Energy = Q_long and EnergyShort = Q_short, and PSD = (Energy − EnergyShort) / Energy is computed in your macro. The cut only sets the neutron bit (0x40) in Flags and is recorded in settings.json.</div>
+    <div class="bar">
+      <strong>Energy-dependent cut</strong>
+      <label>Classification <select id="kMode"><option value="cut">Fixed PSD cut</option><option value="curve">Energy-dependent curve</option></select></label>
+      <label>Criterion <select id="cvCrit"><option value="gamma_k">γ + k·σγ (constant gamma leakage)</option><option value="midpoint">Midpoint (equal error)</option><option value="neutron_k">n − k·σn (constant neutron efficiency)</option></select></label>
+      <label>k <input type="number" id="cvK" value="3" step="0.5" min="0.5" max="6"></label>
+      <label>Slices <input type="number" id="cvN" value="10" min="4" max="30"></label>
+      <label>Min FoM <input type="number" id="cvFom" value="0.5" step="0.1" min="0" max="2"></label>
+      <button class="btn primary" id="cvFit" type="button">Fit curve</button>
+      <span class="muted small">Two-Gaussian fits in logarithmic energy slices over the whole energy range of the selected channel/view; cut(E) = a + b/√E + c/E through the accepted slices. A slice is accepted when the two peaks pass the FoM threshold, two Gaussians improve χ² clearly over one, both peaks lie inside the PSD range and are not too wide, and the minority component holds at least 3 % and 50 events; at least three contiguous slices are needed. Below the first accepted slice events are not classified (counted as gamma); above the last the curve is held constant.</span>
+    </div>
+    <div class="tablewrap short"><table class="t" id="cvTable"><thead><tr><th>Energy slice</th><th>n</th><th>μγ</th><th>σγ</th><th>μn</th><th>σn</th><th>FoM</th><th>Cut</th><th>n %</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+    <div class="mono small muted" id="cvOut"></div>
+    <div class="hint muted small">The cut is not applied to the ROOT output: every event is stored with Energy = Q_long and EnergyShort = Q_short, and PSD = (Energy − EnergyShort) / Energy is computed in your macro. The chosen classification (fixed cut or curve) only sets the neutron bit (0x40) in Flags and is recorded in settings.json.</div>
   </section>
 
   <!-- ========================= Save ========================= -->
