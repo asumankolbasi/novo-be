@@ -511,7 +511,13 @@ self.onmessage = e => { const { id, buf, n, params } = e.data; try { const res =
     }
     return out;
   }
-  function nextValid(i, ch, step) { if (!L.processed) return clamp(i + step, 0, L.frames.n - 1); const v = validMask(ch); for (let j = i + step; j >= 0 && j < v.length; j += step) if (v[j]) return j; return i; }
+  // next frame with a valid pulse on `ch`; before processing, frames are read and analysed one by one (at most 5000)
+  async function nextValid(i, ch, step) {
+    const n = L.frames.n;
+    if (L.processed) { const v = validMask(ch); for (let j = i + step; j >= 0 && j < n; j += step) if (v[j]) return j; return i; }
+    for (let j = i + step, k = 0; j >= 0 && j < n && k < 5000; j += step, k++) { const d = await readFrame(L.frames, j); if (K.processChannel(ch === 0 ? d.ch0 : d.ch1, 1, L.params).valid[0]) return j; }
+    return i;
+  }
 
   // ---------------------------------------------------------------- CoMPASS-style ROOT export (needs rootwriter.js)
   // TTree "Data_R" holds every frame of the processed window, "Data_F" the events passing the active filters.
@@ -637,7 +643,7 @@ self.onmessage = e => { const { id, buf, n, params } = e.data; try { const res =
       if (P === '/api/classifier/curve') { needProc(); const b = body || {}; L.classifier.curve = fitCurve(+(b.view ?? 2), b.criterion || 'gamma_k', +(b.k ?? 3), +(b.nslices ?? 10), +(b.min_fom ?? 0.5)); L.classifier.mode = 'curve'; return { ...L.classifier }; }
       if (P === '/api/hist/time') { need(); return timeHists(num(q, 'ch', 0)); }
       if (P.startsWith('/api/waveform/')) { need(); return waveform(parseInt(P.slice('/api/waveform/'.length), 10)); }
-      if (P === '/api/next_valid') { need(); return { i: nextValid(num(q, 'i', 0), num(q, 'ch', 0), num(q, 'step', 1)) }; }
+      if (P === '/api/next_valid') { need(); return { i: await nextValid(num(q, 'i', 0), num(q, 'ch', 0), num(q, 'step', 1)) }; }
       if (P === '/api/pileup') { need(); L.excludePileup = !!(body && body.exclude); return pileupStats(); }
       if (P === '/api/timewin') { const b = body || {}; if ('enabled' in b) L.twin.enabled = !!b.enabled; for (const k of ['t0_s', 't1_s']) if (k in b) L.twin[k] = (b[k] === null || b[k] === '') ? null : +b[k]; if (L.twin.t0_s != null && L.twin.t1_s != null && L.twin.t1_s < L.twin.t0_s) [L.twin.t0_s, L.twin.t1_s] = [L.twin.t1_s, L.twin.t0_s]; if (L.frames && L.frames.n > 1) { const t = tsNs(), full = t[t.length - 1] / 1e9; if ((L.twin.t0_s == null || L.twin.t0_s <= 0) && (L.twin.t1_s == null || L.twin.t1_s >= full - 1e-6)) L.twin = { enabled: false, t0_s: null, t1_s: null }; } if (L.processed && L.procRange) { const [a, b2] = windowRange(); if (b2 > a && (a < L.procRange[0] || b2 > L.procRange[1])) L.dirty = true; } return { ...L.twin }; }
       if (P === '/api/coinc') { const b = body || {}; if ('enabled' in b) L.coinc.enabled = !!b.enabled; if (b.window_ns != null && Number.isFinite(+b.window_ns)) L.coinc.window_ns = Math.max(0, +b.window_ns); if (b.center_ns != null && Number.isFinite(+b.center_ns)) L.coinc.center_ns = +b.center_ns; return { ...L.coinc }; }

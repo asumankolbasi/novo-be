@@ -50,7 +50,7 @@ async function uploadFiles(fileList) {
   const poll = watchProgress(st, `reading… ${(total / 1048576).toFixed(0)} MB`, t0);
   try {
     const r = await api('/api/upload', { files });
-    S.summary = r.summary; S.cur = 0; S.exported = null;
+    S.summary = r.summary; S.cur = 0; S.exported = null; S.waveAuto = false;
     await loadRuns(); afterSummary(); setTab('time');
     st.textContent = '';
     toast(`Opened: ${num(S.summary.frames)} frames in ${((performance.now() - t0) / 1000).toFixed(1)} s · select the time window and press "Process window"`, 6000);
@@ -71,13 +71,13 @@ async function loadRuns() {
 async function openRun() {
   const name = $('runSelect').value; if (!name) return;
   try { S.summary = await api('/api/open', { name }); } catch (e) { toast('Could not open: ' + e.message); return; }
-  S.cur = 0; S.exported = null; afterSummary(); setTab('time');
+  S.cur = 0; S.exported = null; S.waveAuto = false; afterSummary(); setTab('time');
 }
 async function closeRun() {
   if (!hasRun()) return;
   if (S.playing) togglePlay();
   await api('/api/close', {});
-  S.summary = null; S.params = null; S.cur = 0; S.pending = null; S.lastFit = null; S.exported = null;
+  S.summary = null; S.params = null; S.cur = 0; S.pending = null; S.lastFit = null; S.exported = null; S.waveAuto = false;
   for (const id of ['wavePlot', 'psd2dPlot', 'psd1dPlot', 'ratePlot', 'dtPlot']) { try { Plotly.purge(id); } catch (_) { /* not drawn */ } }
   for (const id of ['pFit', 'pCounts', 'dInfo']) $(id).innerHTML = '';
   $('wRes').tBodies[0].innerHTML = ''; $('xFiles').tBodies[0].innerHTML = ''; $('xFilesWrap').hidden = true; $('xOut').textContent = '';
@@ -95,7 +95,7 @@ async function processRun() {
   try { S.summary = await api('/api/process', {}); }
   catch (e) { toast('Processing failed: ' + e.message, 6000); st.textContent = ''; return; }
   finally { clearInterval(poll); S.processing = false; $('btnProcess').disabled = false; $('tProcess').disabled = false; }
-  S.pending = null; S.exported = null; afterSummary(); st.textContent = '';
+  S.pending = null; S.exported = null; if (S.tab !== 'wave') S.waveAuto = false; afterSummary(); st.textContent = '';
   const pr = S.summary.proc_range;
   toast(`Processed ${num(pr ? pr.frames : S.summary.frames)} frames in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
 }
@@ -161,6 +161,7 @@ function setTab(name) {
 function refreshTab(name) {
   if (!hasRun()) { if (name !== 'data') toast('Load a run first'); return; }
   if (!S.summary.processed && (name === 'psd' || name === 'save')) { toast('Run not processed yet: pick the window on the Time tab and press "Process window"', 5000); return; }
+  if (name === 'wave' && !S.waveAuto) { S.waveAuto = true; goValid(1, true); return; }     // first visit: jump to the first valid pulse
   ({ data: renderInfo, time: refreshTime, wave: refreshWave, psd: refreshPsd, save: refreshSave })[name]();
 }
 
@@ -265,7 +266,12 @@ async function applyPending() {
   finally { $('wApply').disabled = false; refreshWave(); }
 }
 function goTo(i) { if (!hasRun()) return; S.cur = Math.max(0, Math.min(S.summary.frames - 1, i | 0)); refreshWave(); }
-async function goValid(step) { if (!hasRun()) return; const r = await api(`/api/next_valid?i=${S.cur}&ch=${$('wValidCh').value}&step=${step}`); if (r.i === S.cur) toast(step > 0 ? 'No valid pulse after this frame' : 'No valid pulse before this frame'); else goTo(r.i); }
+async function goValid(step, fromHere) {
+  if (!hasRun()) return;
+  const start = fromHere ? S.cur - step : S.cur;                       // fromHere: accept the current frame itself
+  const r = await api(`/api/next_valid?i=${start}&ch=${$('wValidCh').value}&step=${step}`);
+  if (r.i === start) { if (!fromHere) toast(step > 0 ? 'No valid pulse after this frame' : 'No valid pulse before this frame'); refreshWave(); } else goTo(r.i);
+}
 function togglePlay() {
   if (S.playing) { clearInterval(S.playing); S.playing = null; $('wPlay').textContent = 'Play'; return; }
   if (!hasRun()) return; $('wPlay').textContent = 'Stop';
