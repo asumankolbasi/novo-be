@@ -398,6 +398,8 @@ function downloadZip() {
 
 // ------------------------------------------------------------------ wiring
 function init() {
+  const missing = ['kMode', 'cvFit', 'cvTable', 'xBuild', 'tProcess'].filter(id => !$(id));
+  if (missing.length) { alert('This page is out of date (missing: ' + missing.join(', ') + '). Reload with Shift+Reload to fetch the current version.'); return; }
   document.querySelectorAll('.tab, .step').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
   for (const id of ['upInput', 'upInput2']) {
     $(id).addEventListener('change', ev => { uploadFiles([...ev.target.files]); ev.target.value = ''; });
