@@ -340,7 +340,7 @@ self.onmessage = e => { const { id, buf, n, params } = e.data; try { const res =
   // ================================================================ run state
   const L = { runs: new Map(), name: null, meta: null, frames: null, params: validated(DEFAULT_PARAMS), results: {}, processed: false, dirty: false, procRange: null, processMs: 0, tsCache: null,
     coinc: { enabled: true, window_ns: 3.0, center_ns: 0 }, twin: { enabled: false, t0_s: null, t1_s: null }, excludePileup: true,
-    classifier: { mode: 'cut', curve: { a: null, b: 0, c: 0, emin: 0, emax: null, view: 2, estimator: 'gmean', criterion: 'gamma_k', k: 3, points: [] } } };
+    classifier: { mode: 'cut', curve: { a: null, b: 0, c: 0, emin: 0, emax: null, view: 2, estimator: 'gmean', criterion: 'midpoint', k: 3, points: [] } } };
   const need = () => { if (!L.frames) throw new Error('Open a run first'); };
   const needProc = () => { need(); if (!L.processed) throw new Error('Run not processed yet: pick the time window on the Time tab and press "Process window"'); };
   function tsNs() {
@@ -640,7 +640,7 @@ self.onmessage = e => { const { id, buf, n, params } = e.data; try { const res =
       if (P === '/api/hist/psd2d') { needProc(); return psd2d(num(q, 'ch', 0), num(q, 'ne', 200), num(q, 'npsd', 160), num(q, 'elo', null), num(q, 'ehi', null), num(q, 'plo', null), num(q, 'phi', null)); }
       if (P === '/api/hist/psd1d') { needProc(); return psd1d(num(q, 'ch', 0), num(q, 'elo', 0), num(q, 'ehi', 1e12), num(q, 'nbins', 160), num(q, 'plo', null), num(q, 'phi', null)); }
       if (P === '/api/classifier') { const b = body || {}; if (b.mode === 'curve' && L.classifier.curve.a == null) throw new Error('fit the curve first'); if (['cut', 'curve', 'gamma_only', 'neutron_only'].includes(b.mode)) L.classifier.mode = b.mode; return { ...L.classifier }; }
-      if (P === '/api/classifier/curve') { needProc(); const b = body || {}; L.classifier.curve = fitCurve(+(b.view ?? 2), b.criterion || 'gamma_k', +(b.k ?? 3), +(b.nslices ?? 10), +(b.min_fom ?? 0.5)); L.classifier.mode = 'curve'; return { ...L.classifier }; }
+      if (P === '/api/classifier/curve') { needProc(); const b = body || {}; L.classifier.curve = fitCurve(+(b.view ?? 2), b.criterion || 'midpoint', +(b.k ?? 3), +(b.nslices ?? 10), +(b.min_fom ?? 0.5)); L.classifier.mode = 'curve'; return { ...L.classifier }; }
       if (P === '/api/hist/time') { need(); return timeHists(num(q, 'ch', 0)); }
       if (P.startsWith('/api/waveform/')) { need(); return waveform(parseInt(P.slice('/api/waveform/'.length), 10)); }
       if (P === '/api/next_valid') { need(); return { i: await nextValid(num(q, 'i', 0), num(q, 'ch', 0), num(q, 'step', 1)) }; }

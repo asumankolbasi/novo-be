@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NOVO-BE</title>
-<link rel="stylesheet" href="style.css?v=6">
+<link rel="stylesheet" href="style.css?v=7">
 <link rel="icon" type="image/webp" href="novo_logo.webp">
 <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
 </head>
@@ -149,7 +149,7 @@
     <div class="bar">
       <strong>Energy-dependent cut</strong>
       <label>Classification <select id="kMode"><option value="cut">Fixed PSD cut</option><option value="curve">Energy-dependent curve</option></select></label>
-      <label>Criterion <select id="cvCrit"><option value="gamma_k">γ + k·σγ (constant gamma leakage)</option><option value="midpoint">Midpoint (equal error)</option><option value="neutron_k">n − k·σn (constant neutron efficiency)</option></select></label>
+      <label>Criterion <select id="cvCrit"><option value="midpoint">Midpoint (equal error)</option><option value="gamma_k">γ + k·σγ (constant gamma leakage)</option><option value="neutron_k">n − k·σn (constant neutron efficiency)</option></select></label>
       <label>k <input type="number" id="cvK" value="3" step="0.5" min="0.5" max="6"></label>
       <label>Slices <input type="number" id="cvN" value="10" min="4" max="30"></label>
       <label>Min FoM <input type="number" id="cvFom" value="0.5" step="0.1" min="0" max="2"></label>
@@ -222,9 +222,9 @@ t->Draw("(Energy-EnergyShort)/Energy:Energy", "!(Flags&amp;4)", "colz");</pre>
 </main>
 <div class="dropveil" id="dropveil" hidden><div>Drop the files: dma0.bin, dma1.bin, meta.json</div></div>
 <div class="toast" id="toast" hidden></div>
-<script src="pipeline.js?v=6"></script>
-<script src="rootwriter.js?v=6"></script>
-<script src="zip.js?v=6"></script>
-<script src="app.js?v=6"></script>
+<script src="pipeline.js?v=7"></script>
+<script src="rootwriter.js?v=7"></script>
+<script src="zip.js?v=7"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>
