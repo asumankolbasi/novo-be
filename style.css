@@ -81,3 +81,11 @@ dt { color: var(--muted); } dd { margin: 0; font-family: var(--font-mono); font-
 .dropveil { position: fixed; inset: 0; background: rgba(31, 98, 184, .18); border: 3px dashed var(--accent); z-index: 9; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 600; color: var(--fg); pointer-events: none; }
 p { margin: 6px 0 0; }
 code { font-family: var(--font-mono); font-size: 12px; }
+.bar.attention { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
+.bar.attention #srcNote { color: var(--accent); font-weight: 600; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.seg label { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; cursor: pointer; color: var(--fg); border-right: 1px solid var(--border); white-space: nowrap; }
+.seg label:last-child { border-right: none; }
+.seg input { display: none; }
+.seg label.on { background: var(--accent); color: #fff; }
+.seg label.on .muted { color: rgba(255,255,255,.8); }

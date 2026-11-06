@@ -50,7 +50,7 @@ async function uploadFiles(fileList) {
   const poll = watchProgress(st, `reading… ${(total / 1048576).toFixed(0)} MB`, t0);
   try {
     const r = await api('/api/upload', { files });
-    S.summary = r.summary; S.cur = 0; S.exported = null; S.waveAuto = false;
+    S.summary = r.summary; S.cur = 0; S.exported = null; S.waveAuto = false; S.sourceChosen = false;
     await loadRuns(); afterSummary(); setTab('time');
     st.textContent = '';
     toast(`Opened: ${num(S.summary.frames)} frames in ${((performance.now() - t0) / 1000).toFixed(1)} s · select the time window and press "Process window"`, 6000);
@@ -71,13 +71,13 @@ async function loadRuns() {
 async function openRun() {
   const name = $('runSelect').value; if (!name) return;
   try { S.summary = await api('/api/open', { name }); } catch (e) { toast('Could not open: ' + e.message); return; }
-  S.cur = 0; S.exported = null; S.waveAuto = false; afterSummary(); setTab('time');
+  S.cur = 0; S.exported = null; S.waveAuto = false; S.sourceChosen = false; afterSummary(); setTab('time');
 }
 async function closeRun() {
   if (!hasRun()) return;
   if (S.playing) togglePlay();
   await api('/api/close', {});
-  S.summary = null; S.params = null; S.cur = 0; S.pending = null; S.lastFit = null; S.exported = null; S.waveAuto = false;
+  S.summary = null; S.params = null; S.cur = 0; S.pending = null; S.lastFit = null; S.exported = null; S.waveAuto = false; S.sourceChosen = false;
   for (const id of ['wavePlot', 'psd2dPlot', 'psd1dPlot', 'ratePlot', 'dtPlot', 'energyPlot']) { try { Plotly.purge(id); } catch (_) { /* not drawn */ } }
   $('eInfo').textContent = '';
   for (const id of ['pFit', 'pCounts', 'dInfo']) $(id).innerHTML = '';
@@ -127,6 +127,7 @@ function renderChips() {
   if (s.processed && s.proc_range && s.proc_range.frames < s.frames) chip(`processed: ${num(s.proc_range.frames)} frames`);
   for (const ch of [0, 1]) { const x = s.channels[ch]; if (!x) continue; chip(`CH${ch} ${num(x.valid)} pulses · n ${num(x.neutrons)} / γ ${num(x.gammas)}`, 'ch' + ch); }
   if (s.timewin && s.timewin.enabled) chip(`window ${(s.timewin.t0_s ?? 0).toFixed(1)}–${(s.timewin.t1_s ?? s.timewin.run_duration_s).toFixed(1)} s`);
+  if (s.processed) { if (S.sourceChosen) chip(`source: ${SRC_LABEL[['gamma_only', 'neutron_only'].includes(s.classifier.mode) ? s.classifier.mode : 'mixed']}`); else chip('source type not chosen · PSD tab', 'warn'); }
   if (s.header.lost_frames) chip(`${s.header.lost_frames} lost frames`, 'warn');
 }
 function renderInfo() {
@@ -288,6 +289,16 @@ async function submitParams(ev) {
 }
 
 // ------------------------------------------------------------------ PSD tab
+// source type of the run: a prominent choice the user has to make once per run (default: mixed)
+const SRC_LABEL = { mixed: 'mixed n + γ', gamma_only: 'gamma only', neutron_only: 'neutron only' };
+function srcValue() { const r = document.querySelector('#pSrc input:checked'); return r ? r.value : 'mixed'; }
+function renderSource(mode) {
+  const v = ['gamma_only', 'neutron_only'].includes(mode) ? mode : 'mixed';
+  document.querySelectorAll('#pSrc label').forEach(l => { const on = S.sourceChosen && l.querySelector('input').value === v; l.classList.toggle('on', on); l.querySelector('input').checked = on; });
+  $('srcBar').classList.toggle('attention', !S.sourceChosen);
+  $('srcNote').textContent = S.sourceChosen ? (v === 'mixed' ? 'Mixed: n and γ are separated by the cut below (fixed or energy-dependent).' : v === 'gamma_only' ? 'Gamma only: every event is γ, no separation fit; the band is fitted with one Gaussian.' : 'Neutron only: every event is n, no separation fit.')
+    : 'Not chosen yet. Choose before classifying or saving. Mixed: n/γ separated by the cut below. Gamma only / neutron only: every event gets that class, no separation fit.';
+}
 function psdRange() { const lo = parseFloat($('pPlo').value), hi = parseFloat($('pPhi').value); return [Number.isNaN(lo) ? null : lo, Number.isNaN(hi) ? null : hi]; }
 async function refreshPsd() {
   const ch = +$('pCh').value, [plo, phi] = psdRange(), elo = parseFloat($('pElo').value), ehi = parseFloat($('pEhi').value);
@@ -297,7 +308,7 @@ async function refreshPsd() {
   const cut = S.params.psd_cut, xr = [h2.x[0], h2.x[h2.x.length - 1]], yr = [h2.y[0], h2.y[h2.y.length - 1]];
   const winLo = Number.isNaN(elo) ? xr[0] : elo, winHi = Number.isNaN(ehi) ? xr[1] : ehi;
   const cls = (S.summary && S.summary.classifier) || { mode: 'cut' }, single = ['gamma_only', 'neutron_only'].includes(cls.mode) ? cls.mode : null;
-  $('pSrc').value = single || 'mixed';
+  renderSource(cls.mode);
   for (const id of ['pCut', 'pCutApply', 'pCutFromFit', 'kMode', 'cvCrit', 'cvK', 'cvN', 'cvFom', 'cvFit']) $(id).disabled = !!single;
   if (!single) $('kMode').value = cls.mode === 'curve' ? 'curve' : 'cut';
   const curveOn = !single && cls.mode === 'curve' && cls.curve && cls.curve.a != null && cls.curve.view === ch;
@@ -397,6 +408,7 @@ function download(name, parts, type = 'application/octet-stream') {
 async function buildExport() {
   if (!hasRun() || !S.summary.processed) { toast('Process the run first'); return; }
   if (S.summary.dirty) { toast('Gates or window changed: process again first', 5000); return; }
+  if (!S.sourceChosen) { toast('Choose what the run contains (mixed / gamma only / neutron only) on the PSD tab first', 6000); setTab('psd'); return; }
   const pr = S.summary.proc_range, nEv = (pr ? pr.frames : S.summary.frames) * 2;
   if ($('xWave').checked && nEv * 2100 > 1.5e9) { toast('With waveforms the files would exceed 1.5 GB: narrow the time window or leave Samples out', 7000); return; }
   $('xBuild').disabled = true; $('xOut').textContent = 'building…';
@@ -458,7 +470,9 @@ function init() {
   $('pCut').addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); applyCut(parseFloat($('pCut').value)); } });
   $('pCutFromFit').addEventListener('click', () => { const f = S.lastFit; if (!f) { toast('A fit is needed first'); return; } applyCut(+((f.gamma.mu * f.neutron.sigma + f.neutron.mu * f.gamma.sigma) / (f.gamma.sigma + f.neutron.sigma)).toFixed(4)); });
   $('pSrc').addEventListener('change', async () => {
-    const v = $('pSrc').value, cur = S.summary && S.summary.classifier ? S.summary.classifier.mode : 'cut';
+    if (!hasRun() || !S.summary.processed) { toast('Process the run first'); document.querySelectorAll('#pSrc input').forEach(i => { i.checked = false; }); return; }
+    S.sourceChosen = true;
+    const v = srcValue(), cur = S.summary && S.summary.classifier ? S.summary.classifier.mode : 'cut';
     try { if (v === 'mixed') await api('/api/classifier', { mode: S.lastMixedMode || 'cut' }); else { if (!['gamma_only', 'neutron_only'].includes(cur)) S.lastMixedMode = cur; await api('/api/classifier', { mode: v }); } }
     catch (e) { toast(e.message, 5000); await api('/api/classifier', { mode: v === 'mixed' ? 'cut' : v }); }
     S.summary = await api('/api/summary'); S.exported = null; renderChips(); refreshPsd();
