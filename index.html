@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NOVO-BE</title>
-<link rel="stylesheet" href="style.css?v=11">
+<link rel="stylesheet" href="style.css?v=12">
 <link rel="icon" type="image/webp" href="novo_logo.webp">
 <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
 </head>
@@ -174,7 +174,7 @@
   <section id="tab-energy" class="pane">
     <div class="bar">
       <label>Channel <select id="eCh"><option value="2">Both ends √(Q0·Q1)</option><option value="0">CH0</option><option value="1">CH1</option><option value="both">CH0 and CH1</option></select></label>
-      <label>Selection <select id="eSel"><option value="all">All</option><option value="gamma">Gamma</option><option value="neutron">Neutron</option><option value="split">Gamma and neutron</option></select></label>
+      <label>Selection <select id="eSel"><option value="split">Gamma and neutron</option><option value="all">All</option><option value="gamma">Gamma</option><option value="neutron">Neutron</option></select></label>
       <label>Bins <input type="number" id="eBins" value="512" min="16" max="4096" step="16"></label>
       <label><input type="checkbox" id="eLog" checked> Log y</label>
       <button class="btn" id="eRefresh" type="button">Refresh</button>
@@ -245,9 +245,9 @@ t->Draw("(Energy-EnergyShort)/Energy:Energy", "!(Flags&amp;4)", "colz");</pre>
 </main>
 <div class="dropveil" id="dropveil" hidden><div>Drop the files: dma0.bin, dma1.bin, meta.json</div></div>
 <div class="toast" id="toast" hidden></div>
-<script src="pipeline.js?v=11"></script>
-<script src="rootwriter.js?v=11"></script>
-<script src="zip.js?v=11"></script>
-<script src="app.js?v=11"></script>
+<script src="pipeline.js?v=12"></script>
+<script src="rootwriter.js?v=12"></script>
+<script src="zip.js?v=12"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>
