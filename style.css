@@ -88,4 +88,3 @@ code { font-family: var(--font-mono); font-size: 12px; }
 .seg label:last-child { border-right: none; }
 .seg input { display: none; }
 .seg label.on { background: var(--accent); color: #fff; }
-.seg label.on .muted { color: rgba(255,255,255,.8); }

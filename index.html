@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NOVO-BE</title>
-<link rel="stylesheet" href="style.css?v=9">
+<link rel="stylesheet" href="style.css?v=10">
 <link rel="icon" type="image/webp" href="novo_logo.webp">
 <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
 </head>
@@ -129,8 +129,8 @@
     <div class="bar attention" id="srcBar">
       <strong>What does this run contain?</strong>
       <div class="seg" id="pSrc">
-        <label><input type="radio" name="src" value="mixed"> Mixed n + γ <span class="muted small">beam, AmBe, Cf-252</span></label>
-        <label><input type="radio" name="src" value="gamma_only"> Gamma only <span class="muted small">Cs-137, Na-22, Co-60 …</span></label>
+        <label><input type="radio" name="src" value="mixed"> Mixed n + γ</label>
+        <label><input type="radio" name="src" value="gamma_only"> Gamma only</label>
         <label><input type="radio" name="src" value="neutron_only"> Neutron only</label>
       </div>
       <span class="small" id="srcNote">Choose before classifying or saving. Mixed: n/γ separated by the cut below. Gamma only / neutron only: every event gets that class, no separation fit.</span>
@@ -245,9 +245,9 @@ t->Draw("(Energy-EnergyShort)/Energy:Energy", "!(Flags&amp;4)", "colz");</pre>
 </main>
 <div class="dropveil" id="dropveil" hidden><div>Drop the files: dma0.bin, dma1.bin, meta.json</div></div>
 <div class="toast" id="toast" hidden></div>
-<script src="pipeline.js?v=9"></script>
-<script src="rootwriter.js?v=9"></script>
-<script src="zip.js?v=9"></script>
-<script src="app.js?v=9"></script>
+<script src="pipeline.js?v=10"></script>
+<script src="rootwriter.js?v=10"></script>
+<script src="zip.js?v=10"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>
