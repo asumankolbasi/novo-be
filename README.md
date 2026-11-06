@@ -42,6 +42,10 @@ Raw DMA captures of the NOVO backend: 4096-byte frames with a 32-byte header (de
 
 Files are streamed, never loaded whole: opening a run scans the headers (about 100 bytes of memory per frame), processing reads the selected time window in 16 MB chunks through a pool of Web Workers and keeps only the per-frame results, and single waveforms are read from disk on demand. Multi-GB runs are fine; a 5.8 GB run (1.4 million frames) opens in seconds and processes in well under a minute on a laptop.
 
+## If loading fails with "The requested file could not be read…"
+
+The browser could not open the file after you selected it. On macOS this almost always means the browser is not allowed to read the folder (System Settings → Privacy & Security → Files and Folders → your browser → allow Desktop / Documents / Downloads, or give it Full Disk Access), or the file is a cloud placeholder (iCloud "optimize storage", OneDrive, Google Drive) or sits on a network share. Allow the access or copy the run to a local folder outside Desktop / Documents / Downloads, then load it again.
+
 ## Files
 
 - `index.html`, `app.js`, `style.css` – the page

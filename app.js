@@ -30,6 +30,17 @@ const chColor = ch => css(ch === 0 ? '--ch0' : '--ch1');
 const stepXY = (edges, counts) => ({ x: edges.slice(0, -1), y: counts });
 
 // ------------------------------------------------------------------ files / runs
+// Chrome and Edge: pick through the File System Access API so a lost reference can be re-acquired from its handle
+async function pickFiles() {
+  if (!window.showOpenFilePicker) return false;
+  let handles;
+  try { handles = await window.showOpenFilePicker({ multiple: true, types: [{ description: 'NOVO run files', accept: { 'application/octet-stream': ['.bin'], 'application/json': ['.json'] } }] }); }
+  catch (e) { if (e && e.name === 'AbortError') return true; return false; }
+  const files = [];
+  for (const h of handles) { const f = await h.getFile(); f.handle = h; files.push(f); }
+  uploadFiles(files);
+  return true;
+}
 async function uploadFiles(fileList) {
   const files = [...fileList].filter(f => /\.(bin|json)$/i.test(f.name));
   if (!files.length) { toast('Select .bin or .json files'); return; }
@@ -129,7 +140,15 @@ function bindDrop() {
   document.addEventListener('dragenter', ev => { if (ev.dataTransfer && [...ev.dataTransfer.types].includes('Files')) { depth++; veil.hidden = false; } });
   document.addEventListener('dragleave', () => { depth = Math.max(0, depth - 1); if (!depth) veil.hidden = true; });
   document.addEventListener('dragover', ev => { if (ev.dataTransfer && [...ev.dataTransfer.types].includes('Files')) ev.preventDefault(); });
-  document.addEventListener('drop', ev => { depth = 0; veil.hidden = true; if (ev.dataTransfer && ev.dataTransfer.files.length) { ev.preventDefault(); uploadFiles(ev.dataTransfer.files); } });
+  document.addEventListener('drop', async ev => {
+    depth = 0; veil.hidden = true; if (!(ev.dataTransfer && ev.dataTransfer.files.length)) return;
+    ev.preventDefault();
+    const items = [...ev.dataTransfer.items], plain = [...ev.dataTransfer.files];
+    if (items.length && items[0].getAsFileSystemHandle) {
+      try { const files = []; for (const it of items) { const h = await it.getAsFileSystemHandle(); if (h && h.kind === 'file') { const f = await h.getFile(); f.handle = h; files.push(f); } } if (files.length) { uploadFiles(files); return; } } catch (_) { /* fall back to plain File objects */ }
+    }
+    uploadFiles(plain);
+  });
 }
 
 // ------------------------------------------------------------------ tabs
@@ -356,7 +375,10 @@ function downloadZip() {
 // ------------------------------------------------------------------ wiring
 function init() {
   document.querySelectorAll('.tab, .step').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
-  for (const id of ['upInput', 'upInput2']) $(id).addEventListener('change', ev => { uploadFiles(ev.target.files); ev.target.value = ''; });
+  for (const id of ['upInput', 'upInput2']) {
+    $(id).addEventListener('change', ev => { uploadFiles([...ev.target.files]); ev.target.value = ''; });
+    $(id).parentElement.addEventListener('click', async ev => { if (window.showOpenFilePicker) { ev.preventDefault(); await pickFiles(); } });
+  }
   bindDrop();
   $('btnOpen').addEventListener('click', openRun); $('btnClose').addEventListener('click', closeRun);
   $('btnProcess').addEventListener('click', processRun); $('tProcess').addEventListener('click', processRun);

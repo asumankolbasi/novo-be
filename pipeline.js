@@ -144,7 +144,25 @@ self.onmessage = e => { const { id, buf, n, params } = e.data; try { const res =
   const progress = { busy: false, stage: '', done: 0, total: 0 };
   const setProgress = (stage, done, total) => { progress.busy = true; progress.stage = stage; progress.done = done; progress.total = total; };
   const clearProgress = () => { progress.busy = false; progress.stage = ''; progress.done = 0; progress.total = 0; };
-  const sliceBuf = (file, a, b) => file.slice(a, b).arrayBuffer();
+  // Read a byte range of a File. Browsers refuse to read a File whose snapshot went stale or that they
+  // cannot open any more ("could not be read, typically due to permission problems ..."): retry a few
+  // times, re-fetch the File from its handle when we have one, and explain the usual causes if it keeps failing.
+  const NOT_READABLE = 'could not be read';
+  async function sliceBuf(file, a, b) {
+    let err = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try { return await file.slice(a, b).arrayBuffer(); }
+      catch (e) {
+        err = e;
+        if (attempt < 3) { await new Promise(r => setTimeout(r, 300 * (attempt + 1))); if (file.handle) { try { const fresh = await file.handle.getFile(); if (fresh.size === file.size) { fresh.handle = file.handle; file = fresh; } } catch (_) { /* keep the old reference */ } } }
+      }
+    }
+    const msg = String(err && err.message || err);
+    const hint = msg.includes(NOT_READABLE) || (err && err.name === 'NotReadableError')
+      ? ` The browser lost read access to "${file.name}" (at ${(a / 1048576).toFixed(0)} MB). On macOS this usually means the browser is not allowed to read the folder the file is in (System Settings → Privacy & Security → Files and Folders, or Full Disk Access): allow it, or copy the run to a folder outside Desktop / Documents / Downloads. It also happens when the file is a cloud placeholder (iCloud "optimize storage", OneDrive, Google Drive) or on a network share: copy it to the local disk first.`
+      : '';
+    throw new Error(`${file.name}: ${msg}.${hint}`);
+  }
 
   // one sequential pass over a file: headers only, waveforms are discarded
   async function scanHeaders(file, report) {
@@ -557,7 +575,7 @@ self.onmessage = e => { const { id, buf, n, params } = e.data; try { const res =
     let parts;
     try { parts = await Promise.all(bins.map(f => scanHeaders(f, n => { done += n; setProgress('reading frame headers', done, total); }))); }
     finally { clearProgress(); }
-    let meta = null; if (metas.length) { try { meta = JSON.parse(await metas[0].text()); } catch (_) { meta = null; } }
+    let meta = null; if (metas.length) { try { meta = JSON.parse(new TextDecoder().decode(await sliceBuf(metas[0], 0, metas[0].size))); } catch (e) { if (String(e.message).includes(NOT_READABLE)) throw e; meta = null; } }
     L.runs.set(name, { frames: merge(parts), meta, bytes: parts.reduce((a, p) => a + p.bytes, 0) });
     return { run: name, files: files.map(f => f.name) };
   }
